@@ -1,0 +1,20 @@
+1、将您的Python脚本保存为 video_downloader.py
+
+2、在同一文件夹中创建 build.bat 文件，内容如下：
+@echo off
+chcp 65001
+echo 正在打包程序，请稍候...
+pyinstaller --onefile --console --name "视频下载工具" --clean video_downloader.py
+echo.
+echo ✅ 打包完成！
+echo 📁 可执行文件位置: dist\视频下载工具.exe
+echo.
+echo 🎯 使用说明：
+echo    双击运行 "视频下载工具.exe"
+echo    按照提示输入参数即可下载视频
+echo.
+pause
+
+3、双击运行 build.bat 文件，等待几分钟完成打包。
+
+4、完成后会在当前文件夹生成 dist 文件夹，里面就是 视频下载工具.exe 文件。
