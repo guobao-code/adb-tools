@@ -1,0 +1,1 @@
+pyinstaller --onefile --windowed --name "ADB工具" adb_gui.py
