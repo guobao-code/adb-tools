@@ -8,7 +8,7 @@ import queue
 import socket
 import time
 import sys
-
+##123
 
 class ADBGUI:
     def __init__(self, root):
