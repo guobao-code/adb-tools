@@ -264,88 +264,144 @@ def get_choice_input(prompt, min_val, max_val):
 
 
 def get_datetime_input():
-    """简单的日期时间输入选择"""
+    """增强的日期时间输入选择"""
     print("\n📅 日期时间选择")
-    print("=" * 40)
+    print("=" * 50)
 
     # 日期选择
-    print("请选择日期:")
+    print("请选择开始日期:")
     today = datetime.date.today()
     date_options = [
         f"1. 今天 ({today})",
         f"2. 昨天 ({today - datetime.timedelta(days=1)})",
         f"3. 前天 ({today - datetime.timedelta(days=2)})",
-        f"4. 自定义日期"
+        f"4. 3天前 ({today - datetime.timedelta(days=3)})",
+        f"5. 一周前 ({today - datetime.timedelta(days=7)})",
+        f"6. 自定义开始日期"
     ]
 
     for option in date_options:
         print(option)
 
-    date_choice = get_choice_input("日期", 1, 4)
+    date_choice = get_choice_input("开始日期", 1, 6)
 
     if date_choice == 1:
-        selected_date = today
+        start_date = today
     elif date_choice == 2:
-        selected_date = today - datetime.timedelta(days=1)
+        start_date = today - datetime.timedelta(days=1)
     elif date_choice == 3:
-        selected_date = today - datetime.timedelta(days=2)
+        start_date = today - datetime.timedelta(days=2)
+    elif date_choice == 4:
+        start_date = today - datetime.timedelta(days=3)
+    elif date_choice == 5:
+        start_date = today - datetime.timedelta(days=7)
     else:
         # 自定义日期输入
-        date_str = input("请输入日期 (YYYY-MM-DD): ").strip()
-        try:
-            selected_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-        except ValueError:
-            print("❌ 日期格式错误，使用今天")
-            selected_date = today
+        while True:
+            date_str = input("请输入开始日期 (YYYY-MM-DD): ").strip()
+            try:
+                start_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+                break
+            except ValueError:
+                print("❌ 日期格式错误，请重新输入")
 
-    # 时间选择
-    print("\n🕐 请选择时间段:")
-    time_options = [
-        "1. 上午 (08:00-12:00)",
-        "2. 下午 (12:00-18:00)",
-        "3. 晚上 (18:00-24:00)",
-        "4. 全天 (00:00-24:00)",
-        "5. 自定义时间"
+    # 选择结束日期
+    print(f"\n请选择结束日期 (开始日期: {start_date}):")
+    end_date_options = [
+        f"1. 同一天 ({start_date})",
+        f"2. 第二天 ({start_date + datetime.timedelta(days=1)})",
+        f"3. 一周后 ({start_date + datetime.timedelta(days=7)})",
+        f"4. 自定义结束日期"
     ]
 
-    for option in time_options:
+    for option in end_date_options:
         print(option)
 
-    time_choice = get_choice_input("时间段", 1, 5)
+    end_date_choice = get_choice_input("结束日期", 1, 4)
 
-    if time_choice == 1:
-        start_time = datetime.time(8, 0)
-        end_time = datetime.time(12, 0)
-    elif time_choice == 2:
-        start_time = datetime.time(12, 0)
-        end_time = datetime.time(18, 0)
-    elif time_choice == 3:
-        start_time = datetime.time(18, 0)
-        end_time = datetime.time(23, 59)
-    elif time_choice == 4:
+    if end_date_choice == 1:
+        end_date = start_date
+    elif end_date_choice == 2:
+        end_date = start_date + datetime.timedelta(days=1)
+    elif end_date_choice == 3:
+        end_date = start_date + datetime.timedelta(days=7)
+    else:
+        # 自定义结束日期
+        while True:
+            date_str = input("请输入结束日期 (YYYY-MM-DD): ").strip()
+            try:
+                end_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+                if end_date < start_date:
+                    print("❌ 结束日期不能早于开始日期")
+                    continue
+                break
+            except ValueError:
+                print("❌ 日期格式错误，请重新输入")
+
+    # 时间选择模式
+    print(f"\n🕐 时间选择模式 (日期范围: {start_date} 至 {end_date}):")
+    time_mode_options = [
+        "1. 全天模式 (00:00-23:59)",
+        "2. 上午模式 (08:00-12:00)",
+        "3. 下午模式 (12:00-18:00)", 
+        "4. 晚上模式 (18:00-23:59)",
+        "5. 工作时间模式 (09:00-18:00)",
+        "6. 自定义时间范围"
+    ]
+
+    for option in time_mode_options:
+        print(option)
+
+    time_mode = get_choice_input("时间模式", 1, 6)
+
+    if time_mode == 1:
         start_time = datetime.time(0, 0)
         end_time = datetime.time(23, 59)
+    elif time_mode == 2:
+        start_time = datetime.time(8, 0)
+        end_time = datetime.time(12, 0)
+    elif time_mode == 3:
+        start_time = datetime.time(12, 0)
+        end_time = datetime.time(18, 0)
+    elif time_mode == 4:
+        start_time = datetime.time(18, 0)
+        end_time = datetime.time(23, 59)
+    elif time_mode == 5:
+        start_time = datetime.time(9, 0)
+        end_time = datetime.time(18, 0)
     else:
         # 自定义时间输入
-        start_str = input("开始时间 (HH:MM): ").strip()
-        end_str = input("结束时间 (HH:MM): ").strip()
-        try:
-            start_time = datetime.datetime.strptime(start_str, "%H:%M").time()
-            end_time = datetime.datetime.strptime(end_str, "%H:%M").time()
-        except ValueError:
-            print("❌ 时间格式错误，使用全天")
-            start_time = datetime.time(0, 0)
-            end_time = datetime.time(23, 59)
+        while True:
+            start_str = input("开始时间 (HH:MM，例如: 08:30): ").strip()
+            end_str = input("结束时间 (HH:MM，例如: 17:45): ").strip()
+            try:
+                start_time = datetime.datetime.strptime(start_str, "%H:%M").time()
+                end_time = datetime.datetime.strptime(end_str, "%H:%M").time()
+                if end_time <= start_time:
+                    print("❌ 结束时间必须晚于开始时间")
+                    continue
+                break
+            except ValueError:
+                print("❌ 时间格式错误，请重新输入")
 
     # 组合日期时间
-    start_dt = datetime.datetime.combine(selected_date, start_time)
-    end_dt = datetime.datetime.combine(selected_date, end_time)
+    start_dt = datetime.datetime.combine(start_date, start_time)
+    end_dt = datetime.datetime.combine(end_date, end_time)
+    
+    # 如果结束时间早于开始时间，将结束日期延后一天
+    if end_dt <= start_dt:
+        end_dt = datetime.datetime.combine(end_date + datetime.timedelta(days=1), end_time)
 
     # 转换为时间戳
     start_ts = int(start_dt.timestamp() * 1000)
     end_ts = int(end_dt.timestamp() * 1000)
 
-    print(f"✅ 选择时间: {start_dt} 至 {end_dt}")
+    print(f"✅ 选择时间范围: {start_dt} 至 {end_dt}")
+    
+    # 显示时长信息
+    duration = end_dt - start_dt
+    print(f"📊 总时长: {duration}")
+    
     return start_ts, end_ts
 
 
@@ -360,13 +416,24 @@ def show_time_summary(start_ts, end_ts):
     print(f"  结束: {end_dt.strftime('%Y-%m-%d %H:%M')}")
     print(f"  时长: {duration}")
 
-    hours = duration.total_seconds() / 3600
-    if hours > 24:
-        print(f"  约 {int(hours / 24)} 天 {int(hours % 24)} 小时")
-    elif hours >= 1:
-        print(f"  约 {hours:.1f} 小时")
+    # 更详细的时间分解
+    total_seconds = duration.total_seconds()
+    days = int(total_seconds // 86400)
+    hours = int((total_seconds % 86400) // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    
+    if days > 0:
+        print(f"  详情: {days} 天 {hours} 小时 {minutes} 分钟")
+    elif hours > 0:
+        print(f"  详情: {hours} 小时 {minutes} 分钟")
     else:
-        print(f"  约 {int(duration.total_seconds() / 60)} 分钟")
+        print(f"  详情: {minutes} 分钟")
+    
+    # 显示覆盖的日期范围
+    if start_dt.date() != end_dt.date():
+        print(f"  覆盖日期: {start_dt.strftime('%m-%d')} 至 {end_dt.strftime('%m-%d')}")
+        date_count = (end_dt.date() - start_dt.date()).days + 1
+        print(f"  覆盖天数: {date_count} 天")
 
 
 def get_user_input():
