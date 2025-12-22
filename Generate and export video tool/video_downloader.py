@@ -494,6 +494,189 @@ def replace_ip_in_url(url, new_ip_port):
     return url.replace(original_ip_port, new_ip_port) if original_ip_port else url
 
 
+def extract_task_earliest_time(task_data):
+    """提取任务的最早视频时间，用于任务排序"""
+    try:
+        raw_data = task_data.get("raw_data", {})
+        score_info = raw_data.get("score_info", {})
+        
+        # 优先检查task_running_time字段
+        if "task_running_time" in score_info:
+            running_time = score_info["task_running_time"]
+            
+            # 如果是数组，取最早的时间
+            if isinstance(running_time, list):
+                # 获取所有时间值并找到最早的
+                valid_times = []
+                for time_value in running_time:
+                    if isinstance(time_value, (int, float)):
+                        if time_value > 1e12:  # 毫秒时间戳
+                            valid_times.append(time_value / 1000)
+                        else:  # 秒时间戳
+                            valid_times.append(time_value)
+                    elif isinstance(time_value, str) and time_value.isdigit():
+                        timestamp = int(time_value)
+                        if timestamp > 1e12:
+                            valid_times.append(timestamp / 1000)
+                        else:
+                            valid_times.append(timestamp)
+                    elif isinstance(time_value, str):
+                        # 尝试解析时间字符串
+                        formats = ["%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"]
+                        for fmt in formats:
+                            try:
+                                dt = datetime.datetime.strptime(time_value, fmt)
+                                # 如果只有时间没有日期，使用任务日期
+                                if fmt.startswith("%H:"):
+                                    task_dt = task_data.get("parsed_datetime", datetime.datetime.now())
+                                    dt = datetime.datetime.combine(task_dt.date(), dt.time())
+                                valid_times.append(dt.timestamp())
+                                break
+                            except ValueError:
+                                continue
+                
+                return min(valid_times) if valid_times else 0
+            
+            # 如果是单个值
+            elif isinstance(running_time, (int, float)):
+                if running_time > 1e12:
+                    return running_time / 1000
+                else:
+                    return running_time
+            elif isinstance(running_time, str):
+                if running_time.isdigit():
+                    timestamp = int(running_time)
+                    if timestamp > 1e12:
+                        return timestamp / 1000
+                    else:
+                        return timestamp
+                else:
+                    # 尝试解析时间字符串
+                    formats = ["%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"]
+                    for fmt in formats:
+                        try:
+                            dt = datetime.datetime.strptime(running_time, fmt)
+                            if fmt.startswith("%H:"):
+                                task_dt = task_data.get("parsed_datetime", datetime.datetime.now())
+                                dt = datetime.datetime.combine(task_dt.date(), dt.time())
+                            return dt.timestamp()
+                        except ValueError:
+                            continue
+        
+        # 检查其他可能的时间字段
+        time_fields = ["video_time", "start_time", "end_time", "record_time", "timestamp", "create_time"]
+        for field in time_fields:
+            if field in score_info:
+                time_info = score_info[field]
+                
+                if isinstance(time_info, dict):
+                    return time_info.get("time", time_info.get("timestamp", 0))
+                elif isinstance(time_info, (int, float)):
+                    if time_info > 1e12:
+                        return time_info / 1000
+                    else:
+                        return time_info
+                elif isinstance(time_info, str) and time_info.isdigit():
+                    timestamp = int(time_info)
+                    if timestamp > 1e12:
+                        return timestamp / 1000
+                    else:
+                        return timestamp
+        
+        # 如果没有找到task_running_time，使用任务的原始时间
+        return task_data.get("timestamp", 0) / 1000
+        
+    except Exception as e:
+        logger.debug(f"提取任务最早时间失败: {e}")
+        return task_data.get("timestamp", 0) / 1000
+
+
+def extract_video_time_info(url, raw_data):
+    """从raw_data中提取视频时间信息"""
+    try:
+        # 尝试从score_info中提取时间信息
+        score_info = raw_data.get("score_info", {})
+        
+        # 优先检查task_running_time字段
+        if "task_running_time" in score_info:
+            running_time = score_info["task_running_time"]
+            
+            # 如果task_running_time是数组，按URL索引匹配
+            if isinstance(running_time, list):
+                # 获取所有视频URL的顺序
+                all_video_urls = []
+                for key in ["playback", "publicPlayback", "videoUrls"]:
+                    urls = score_info.get(key, [])
+                    if isinstance(urls, list):
+                        all_video_urls.extend(urls)
+                    elif isinstance(urls, str):
+                        all_video_urls.append(urls)
+                
+                # 找到当前URL在数组中的位置
+                if url in all_video_urls:
+                    url_index = all_video_urls.index(url)
+                    if url_index < len(running_time):
+                        time_value = running_time[url_index]
+                        if isinstance(time_value, (int, float)):
+                            return time_value
+                        elif isinstance(time_value, str):
+                            # 尝试解析字符串时间
+                            try:
+                                # 如果是时间戳字符串
+                                if time_value.isdigit():
+                                    timestamp = int(time_value)
+                                    if timestamp > 1e12:  # 毫秒时间戳
+                                        return timestamp / 1000
+                                    else:  # 秒时间戳
+                                        return timestamp
+                                # 如果是时间格式字符串
+                                formats = ["%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"]
+                                for fmt in formats:
+                                    try:
+                                        dt = datetime.datetime.strptime(time_value, fmt)
+                                        return dt.timestamp()
+                                    except ValueError:
+                                        continue
+                            except Exception:
+                                pass
+            
+            # 如果task_running_time是单个值
+            elif isinstance(running_time, (int, float)):
+                return running_time
+            elif isinstance(running_time, str):
+                try:
+                    if running_time.isdigit():
+                        timestamp = int(running_time)
+                        if timestamp > 1e12:
+                            return timestamp / 1000
+                        else:
+                            return timestamp
+                except Exception:
+                    pass
+        
+        # 检查其他可能的时间字段
+        time_fields = ["video_time", "start_time", "end_time", "record_time", "timestamp", "create_time"]
+        for field in time_fields:
+            if field in score_info:
+                time_info = score_info[field]
+                
+                if isinstance(time_info, dict):
+                    return time_info.get("time", time_info.get("timestamp", 0))
+                elif isinstance(time_info, (int, float)):
+                    return time_info
+                elif isinstance(time_info, str) and time_info.isdigit():
+                    timestamp = int(time_info)
+                    if timestamp > 1e12:
+                        return timestamp / 1000
+                    else:
+                        return timestamp
+        
+        return 0
+    except Exception as e:
+        logger.debug(f"提取视频时间信息失败: {e}")
+        return 0
+
+
 def extract_video_identifier(url):
     """提取视频唯一标识用于去重"""
     if not url or not isinstance(url, str):
@@ -738,7 +921,8 @@ def fetch_tasks_from_device(start_ts, end_ts, base_save_dir):
                 "task_id": task_id,
                 "sport_name": task_info.get("sport_info", {}).get("sport_name", "未知项目"),
                 "video_urls": video_urls,
-                "raw_data": task_info
+                "raw_data": task_info,
+                "score_info": score_info  # 保存score_info便于后续时间提取
             }
 
             # 解析任务时间
@@ -748,8 +932,12 @@ def fetch_tasks_from_device(start_ts, end_ts, base_save_dir):
 
             tasks.append(task_data)
 
-        # 按时间排序任务（从早到晚）
-        tasks.sort(key=lambda x: x["timestamp"])
+        # 按任务内最早视频时间排序任务（从早到晚）
+        for task in tasks:
+            earliest_time = extract_task_earliest_time(task)
+            task["video_earliest_time"] = earliest_time
+        
+        tasks.sort(key=lambda x: x["video_earliest_time"])
 
         logger.info(f"获取到 {len(tasks)} 个任务，已按时间排序")
 
@@ -891,18 +1079,18 @@ def download_tasks_videos(tasks, backup_ip, max_workers):
     # 准备所有下载任务（按时间顺序）
     download_args = []
 
-    # 首先输出任务时间顺序
-    logger.info("任务按时间顺序排列:")
+    # 首先输出任务时间顺序（基于最早视频时间）
+    logger.info("任务按最早视频时间顺序排列:")
     for task_idx, task in enumerate(tasks, 1):
-        task_time = datetime.datetime.fromtimestamp(task["timestamp"] / 1000)
-        logger.info(f"  {task_idx:02d}. {task_time} - {task['sport_name']} (ID: {task['task_id']})")
+        video_time = datetime.datetime.fromtimestamp(task["video_earliest_time"])
+        logger.info(f"  {task_idx:02d}. {video_time} - {task['sport_name']} (ID: {task['task_id']})")
 
     for task_idx, task in enumerate(tasks, 1):
         task_id = task["task_id"]
         sport_name = task["sport_name"]
-        task_time = datetime.datetime.fromtimestamp(task["timestamp"] / 1000)
+        task_time = datetime.datetime.fromtimestamp(task["video_earliest_time"])
 
-        # 创建按时间命名的文件夹
+        # 创建按任务内最早视频时间命名的文件夹
         time_str = task_time.strftime("%Y%m%d_%H%M%S")
         task_folder = f"{task_idx:03d}_{time_str}_{re.sub(r'[<>:\"/\\\\|?*]', '_', sport_name)}_{task_id}"
         task_path = base_path / task_folder
@@ -916,6 +1104,8 @@ def download_tasks_videos(tasks, backup_ip, max_workers):
             logger.info(f"任务 {task_id} 无有效视频URL")
             continue
 
+        logger.info(f"任务 {task_id} 包含 {len(task_unique_urls)} 个视频")
+        
         for vid_idx, url in enumerate(task_unique_urls, 1):
             identifier = extract_video_identifier(url)
             filename = identifier if identifier else f"video_{vid_idx:03d}.mp4"
