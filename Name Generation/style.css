@@ -148,3 +148,109 @@ select:focus, input:focus {
     color: #999;
     padding: 40px;
 }
+
+/* 加载动画 */
+.loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.loading span {
+    margin-top: 20px;
+    color: #667eea;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Toast 提示 */
+.toast {
+    position: fixed;
+    bottom: 160px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 1000;
+}
+
+/* 暗黑模式 */
+body.dark-theme {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+}
+
+body.dark-theme .container {
+    background: #1e1e2e;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+body.dark-theme h1,
+body.dark-theme h2,
+body.dark-theme label {
+    color: #e0e0e0;
+}
+
+body.dark-theme select,
+body.dark-theme input {
+    background: #2a2a3e;
+    border-color: #3a3a4e;
+    color: #e0e0e0;
+}
+
+body.dark-theme select:focus,
+body.dark-theme input:focus {
+    border-color: #667eea;
+}
+
+body.dark-theme .result {
+    background: #1a1a2e;
+}
+
+body.dark-theme #nameList {
+    background: #2a2a3e;
+}
+
+body.dark-theme .name-item {
+    background: #2a2a3e;
+    color: #e0e0e0;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+body.dark-theme .name-item:hover {
+    background: #3a3a4e;
+}
+
+body.dark-theme .name-text {
+    color: #e0e0e0;
+}
+
+.btn-theme {
+    background: linear-gradient(135deg, #9f94a0 0%, #f5576c 100%) !important;
+}
+
+.btn-theme:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(240, 147, 251, 0.4);
+}

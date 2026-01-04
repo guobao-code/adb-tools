@@ -42,6 +42,7 @@ class ADBGUI:
         self.auto_scroll = tk.BooleanVar(value=True)  # 自动滚动开关
         self.filter_keyword = tk.StringVar(value="")  # 日志过滤关键词
         self.filter_level = tk.StringVar(value="ALL") # 日志级别过滤
+        self.raw_logs = []  # 新增：维护原始日志列表，用于过滤恢复
 
         # 创建主框架（改用PanedWindow实现可拖拽调整区域大小）
         main_paned = ttk.PanedWindow(root, orient=tk.VERTICAL)
@@ -177,6 +178,7 @@ class ADBGUI:
         for level, color in self.log_colors.items():
             self.output_text.tag_configure(level, foreground=color)
         self.output_text.tag_configure("LINE", foreground="#e0e0e0")  # 行号颜色
+        self.output_text.tag_configure("TITLE", font=("Microsoft YaHei", 10, "bold"))  # 设备信息标题样式
 
         # 状态栏
         self.status_var = tk.StringVar(value="正在启动ADB服务...")
@@ -198,6 +200,9 @@ class ADBGUI:
         
         # 设备卡片样式
         style.configure("DeviceCard.TFrame", background="#ffffff", relief=tk.RAISED, borderwidth=1)
+        # 补充悬停样式
+        style.configure("Hover.TFrame", background="#e9f5ff", relief=tk.RAISED, borderwidth=2)
+        
         style.configure("DeviceCard.TLabel", font=("Microsoft YaHei", 9))
         style.configure("DeviceStatus.Online.TLabel", foreground="#28a745")
         style.configure("DeviceStatus.Offline.TLabel", foreground="#dc3545")
@@ -380,13 +385,14 @@ class ADBGUI:
 
     # ========== 输出区域优化核心方法 ==========
     def append_output(self, text, level="INFO"):
-        """添加带级别和颜色的日志输出"""
+        """添加带级别和颜色的日志输出（优化：存入原始日志列表）"""
         # 格式化时间戳
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        log_line = f"[{timestamp}] {text}\n"
-        
+        log_line = f"[{timestamp}] {text}"
+        # 存入原始日志列表
+        self.raw_logs.append((log_line, level))
         # 主线程更新UI
-        self.root.after(0, self._update_output_with_color, log_line, level)
+        self.root.after(0, self._update_output_with_color, log_line + "\n", level)
 
     def _update_output_with_color(self, log_line, level):
         """带颜色更新输出文本"""
@@ -404,50 +410,31 @@ class ADBGUI:
         self.output_text.update_idletasks()
 
     def filter_logs(self, *args):
-        """过滤日志显示"""
-        # 暂存原始日志（简化版，完整实现需维护日志列表）
-        current_content = self.output_text.get(1.0, tk.END)
+        """优化：基于原始日志列表过滤，支持恢复原始日志"""
         self.output_text.delete(1.0, tk.END)
-        
-        # 按级别和关键词过滤
+        # 获取过滤条件
         level_filter = self.filter_level.get()
         keyword_filter = self.filter_keyword.get().lower()
-        
-        # 重新插入符合条件的日志
-        lines = current_content.split('\n')
-        for line in lines:
-            if not line:
+
+        # 遍历原始日志，筛选符合条件的日志
+        for log_line, level in self.raw_logs:
+            if not log_line:
                 continue
-                
+
             # 级别过滤
-            if level_filter != "ALL":
-                if level_filter == "SUCCESS" and "成功" not in line and "connected" not in line.lower():
-                    continue
-                elif level_filter == "WARNING" and "警告" not in line and "warning" not in line.lower():
-                    continue
-                elif level_filter == "ERROR" and "错误" not in line and "error" not in line.lower():
-                    continue
-                elif level_filter == "INFO" and any(x in line.lower() for x in ["成功", "警告", "错误", "error", "warning"]):
-                    continue
-            
-            # 关键词过滤
-            if keyword_filter and keyword_filter not in line.lower():
+            if level_filter != "ALL" and level != level_filter:
                 continue
-                
+
+            # 关键词过滤
+            if keyword_filter and keyword_filter not in log_line.lower():
+                continue
+
             # 重新上色插入
-            if "[" in line and "]" in line:
-                timestamp_end = line.find(']') + 1
-                self.output_text.insert(tk.END, line[:timestamp_end] + "\n", "TIMESTAMP")
-                # 简单判断级别
-                if any(x in line for x in ["成功", "connected"]):
-                    self.output_text.insert(tk.END, line[timestamp_end:] + "\n", "SUCCESS")
-                elif any(x in line for x in ["警告", "warning"]):
-                    self.output_text.insert(tk.END, line[timestamp_end:] + "\n", "WARNING")
-                elif any(x in line for x in ["错误", "error", "失败"]):
-                    self.output_text.insert(tk.END, line[timestamp_end:] + "\n", "ERROR")
-                else:
-                    self.output_text.insert(tk.END, line[timestamp_end:] + "\n", "INFO")
-        
+            if "[" in log_line and "]" in log_line:
+                timestamp_end = log_line.find(']') + 1
+                self.output_text.insert(tk.END, log_line[:timestamp_end], "TIMESTAMP")
+                self.output_text.insert(tk.END, log_line[timestamp_end:] + "\n", level)
+
         if self.auto_scroll.get():
             self.output_text.see(tk.END)
 
@@ -470,7 +457,27 @@ class ADBGUI:
         """清空日志（带确认）"""
         if messagebox.askyesno("确认清空", "确定要清空所有日志吗？"):
             self.output_text.delete(1.0, tk.END)
+            self.raw_logs.clear()  # 同时清空原始日志列表
             self.append_output("日志已清空", "INFO")
+
+    # ========== 新增：全局主板信息查询入口（修复AttributeError） ==========
+    def show_board_info(self):
+        """全局主板信息查询（处理无设备/单个设备/多个设备场景）"""
+        # 1. 无已授权设备时给出提示
+        if not self.devices_list:
+            messagebox.showinfo("提示", "没有已授权设备可查询主板信息！")
+            return
+        
+        # 2. 单个设备直接查询
+        if len(self.devices_list) == 1:
+            device_id = self.devices_list[0]
+            self.show_board_info_window(device_id)
+            return
+        
+        # 3. 多个设备时弹出选择框，让用户选择要查询的设备
+        device_id = self.ask_select_device()
+        if device_id:  # 用户选择了设备才执行查询
+            self.show_board_info_window(device_id)
 
     # ========== 原有核心功能（保留 + 优化） ==========
     def normalize_text(self, text):
@@ -964,7 +971,7 @@ class ADBGUI:
                 self.append_output(f"导出设备信息失败: {str(e)}", "ERROR")
 
     def show_file_manager(self, device=None):
-        """文件管理器（保留原有功能）"""
+        """文件管理器（增强：支持双击进入文件夹）"""
         if not device:
             if not self.devices_list:
                 messagebox.showwarning("警告", "无可用设备")
@@ -1009,8 +1016,27 @@ class ADBGUI:
         ttk.Button(btn_frame, text="下载选中", command=lambda: self.download_selected(device, file_list)).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_frame, text="刷新", command=lambda: self.browse_device_path(device, self.current_path_var.get(), file_list)).pack(side=tk.LEFT, padx=2)
 
+        # 绑定双击进入文件夹事件
+        file_list.bind("<Double-1>", lambda e: self.enter_selected_folder(device, file_list))
+
         # 初始加载
         self.browse_device_path(device, "/sdcard", file_list)
+
+    def enter_selected_folder(self, device, file_list):
+        """双击进入选中文件夹"""
+        selection = file_list.selection()
+        if not selection:
+            return
+        item = file_list.item(selection[0])
+        name = item['values'][0]
+        ftype = item['values'][2]
+        if ftype != "目录":
+            return  # 非目录不处理
+        # 拼接新路径
+        current_path = self.current_path_var.get()
+        new_path = os.path.join(current_path, name).replace('\\', '/')
+        # 浏览新路径
+        self.browse_device_path(device, new_path, file_list)
 
     def browse_device_path(self, device, path, file_list):
         """浏览设备路径"""

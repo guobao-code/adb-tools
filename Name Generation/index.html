@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>人名生成器</title>
+    <title>名字生成器</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>人名生成器</h1>
+        <h1>名字生成器</h1>
         
         <div class="form-group">
             <label for="nameType">人名类型:</label>
@@ -51,14 +51,21 @@
             </select>
         </div>
 
-        <button id="generateBtn" class="btn">生成人名</button>
-        <button id="copyBtn" class="btn btn-secondary">复制结果</button>
+        <button id="generateBtn" class="btn">🖌 生成人名</button>
+        <button id="copyBtn" class="btn btn-secondary">📖 复制结果</button>
+        <button id="themeBtn" class="btn btn-theme">🌙 切换主题</button>
 
         <div class="result">
             <h2>生成结果:</h2>
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <span>正在生成...</span>
+            </div>
             <div id="nameList"></div>
         </div>
     </div>
+
+    <div id="toast" class="toast"></div>
 
     <script src="script.js"></script>
 </body>
