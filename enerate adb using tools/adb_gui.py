@@ -26,6 +26,7 @@ class ADBGUI:
         self.devices_list = []
         self.unauthorized_devices_list = []
         self.device_details = {}  # 存储设备详细信息 {device_id: {"model": "", "ip": "", "type": "wired/wireless"}}
+        self.recent_connections = []  # 存储最近成功连接的设备地址
 
         # 命令队列
         self.command_queue = queue.Queue()
@@ -68,14 +69,12 @@ class ADBGUI:
                    command=self.refresh_devices).grid(row=0, column=0, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="连接设备(IP)",
                    command=self.connect_device).grid(row=0, column=1, padx=2, pady=2, sticky=(tk.W, tk.E))
-        ttk.Button(device_buttons_frame, text="安装APK",
-                   command=self.install_apk).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
-        ttk.Button(device_buttons_frame, text="主板信息",
-                   command=self.show_board_info).grid(row=0, column=3, padx=2, pady=2, sticky=(tk.W, tk.E))
-        ttk.Button(device_buttons_frame, text="一键息屏/亮屏",
-                   command=self.toggle_screen).grid(row=0, column=4, padx=2, pady=2, sticky=(tk.W, tk.E))
+        ttk.Button(device_buttons_frame, text="息屏",
+                   command=lambda: self.toggle_screen("off")).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
+        ttk.Button(device_buttons_frame, text="亮屏",
+                   command=lambda: self.toggle_screen("on")).grid(row=0, column=3, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="重启ADB服务",
-                   command=self.restart_adb_server).grid(row=0, column=5, padx=2, pady=2, sticky=(tk.W, tk.E))
+                   command=self.restart_adb_server).grid(row=0, column=4, padx=2, pady=2, sticky=(tk.W, tk.E))
 
         # 设备搜索过滤
         device_filter_frame = ttk.Frame(device_top_frame)
@@ -187,11 +186,13 @@ class ADBGUI:
 
         # 初始化样式
         self.setup_styles()
-        
+
         # 初始化操作
-        self.ensure_adb_server_running()
         self._start_command_processor()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # 延迟启动ADB检查，确保GUI完全加载
+        self.root.after(500, self.ensure_adb_server_running)
 
     # ========== 样式配置（设备卡片美化） ==========
     def setup_styles(self):
@@ -269,7 +270,7 @@ class ADBGUI:
                 # 创建设备卡片（美化版）
                 card_frame = ttk.Frame(self.device_scrollable_frame, style="DeviceCard.TFrame", padding="8")
                 card_frame.grid(row=row, column=col, padx=8, pady=8, sticky=(tk.W, tk.E))
-                card_frame.configure(width=260, height=180)
+                card_frame.configure(width=260, height=200)  # 增加高度以适应两行按钮
                 card_frame.grid_propagate(False)  # 固定卡片大小
                 
                 # 卡片悬停效果（模拟）
@@ -305,18 +306,22 @@ class ADBGUI:
                 # 操作按钮区
                 btn_frame = ttk.Frame(card_frame)
                 btn_frame.pack(fill=tk.X, expand=True)
-                for i in range(4):
+                for i in range(5):  # 改为5个按钮
                     btn_frame.columnconfigure(i, weight=1)
 
-                # 操作按钮
+                # 操作按钮（两行布局，第一行3个，第二行2个）
+                # 第一行
                 ttk.Button(btn_frame, text="断开", style="Action.TButton",
                            command=lambda d=device_id: self.disconnect_single_device(d)).grid(row=0, column=0, padx=2, pady=2, sticky=(tk.W, tk.E))
                 ttk.Button(btn_frame, text="控制", style="Action.TButton",
                            command=lambda d=device_id: self.remote_control_device(d)).grid(row=0, column=1, padx=2, pady=2, sticky=(tk.W, tk.E))
+                ttk.Button(btn_frame, text="安装APK", style="Action.TButton",
+                           command=lambda d=device_id: self.install_apk(d)).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
+                # 第二行
                 ttk.Button(btn_frame, text="文件", style="Action.TButton",
-                           command=lambda d=device_id: self.show_file_manager(d)).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
+                           command=lambda d=device_id: self.show_file_manager(d)).grid(row=1, column=0, columnspan=2, padx=2, pady=2, sticky=(tk.W, tk.E))
                 ttk.Button(btn_frame, text="信息", style="Action.TButton",
-                           command=lambda d=device_id: self.show_board_info_window(d)).grid(row=0, column=3, padx=2, pady=2, sticky=(tk.W, tk.E))
+                           command=lambda d=device_id: self.show_board_info_window(d)).grid(row=1, column=2, columnspan=3, padx=2, pady=2, sticky=(tk.W, tk.E))
 
                 # 更新行列位置
                 col += 1
@@ -511,12 +516,17 @@ class ADBGUI:
         if device_id:
             cmd = cmd.replace('adb ', f'adb -s {device_id} ', 1)
         self.update_status(f"执行命令: {cmd}")
+        self.append_output(f"加入命令队列: {cmd}", "INFO")  # 添加调试日志
         self.command_queue.put((cmd, device_id, retry_count))
 
     def _run_adb_command(self, cmd, device_id=None, retry_count=2):
         """线程执行ADB命令"""
         device_prefix = f"[{device_id}] " if device_id else ""
-        
+        self.append_output(f"[DEBUG] _run_adb_command 被调用", "INFO")  # 调试日志
+        self.append_output(f"[DEBUG] cmd参数: '{cmd}'", "INFO")  # 调试日志
+        self.append_output(f"[DEBUG] device_id参数: '{device_id}'", "INFO")  # 调试日志
+        self.append_output(f"[DEBUG] retry_count参数: {retry_count}", "INFO")  # 调试日志
+
         if "input keyevent 26" in cmd:
             self.append_output(f"{device_prefix}执行：屏幕状态切换命令", "INFO")
         else:
@@ -573,6 +583,7 @@ class ADBGUI:
         """刷新设备列表（新增设备详细信息获取）"""
         def _refresh():
             self.update_status("正在刷新设备列表...")
+            self.append_output("开始扫描设备...", "INFO")
             
             try:
                 # 获取设备列表
@@ -584,6 +595,8 @@ class ADBGUI:
                     timeout=10
                 )
                 lines = result.stdout.strip().split('\n')
+                
+                self.append_output(f"ADB命令输出: {result.stdout}", "INFO")
 
                 devices = []
                 unauthorized_devices = []
@@ -591,10 +604,19 @@ class ADBGUI:
 
                 # 解析设备信息
                 for line in lines[1:]:
-                    if line.strip() and '\t' in line:
-                        parts = line.strip().split('\t')
-                        device_id = parts[0]
-                        status_part = parts[1]
+                    if line.strip():
+                        # 支持制表符或空格分隔
+                        if '\t' in line:
+                            parts = line.strip().split('\t')
+                        else:
+                            # 使用正则表达式分割多个空格
+                            parts = re.split(r'\s{2,}', line.strip())
+
+                        if len(parts) >= 2:
+                            device_id = parts[0]
+                            status_part = parts[1]
+                        
+                        self.append_output(f"解析设备: {device_id}, 状态: {status_part}", "INFO")
                         
                         # 解析状态
                         if 'device' in status_part:
@@ -622,8 +644,11 @@ class ADBGUI:
                                 "ip": ip
                             }
                             
+                            self.append_output(f"设备详情: {device_id} - {model} ({dev_type})", "SUCCESS")
+                            
                         elif 'unauthorized' in status_part:
                             unauthorized_devices.append(device_id)
+                            self.append_output(f"未授权设备: {device_id}", "WARNING")
 
                 self.devices_list = devices
                 self.unauthorized_devices_list = unauthorized_devices
@@ -635,10 +660,13 @@ class ADBGUI:
                 # 更新状态
                 if devices:
                     self.update_status(f"找到 {len(devices)} 个已授权设备")
+                    self.append_output(f"成功扫描到 {len(devices)} 个设备", "SUCCESS")
                 elif unauthorized_devices:
                     self.update_status("设备未授权，请在设备上确认授权")
+                    self.append_output(f"发现 {len(unauthorized_devices)} 个未授权设备，请在设备上确认", "WARNING")
                 else:
                     self.update_status("未找到任何设备")
+                    self.append_output("未检测到任何设备", "WARNING")
 
             except subprocess.TimeoutExpired:
                 self.update_status("设备检测超时")
@@ -705,9 +733,24 @@ class ADBGUI:
             "10.0.0.2", "10.0.0.3", "10.0.0.4", "10.0.0.5",
             "10.0.0.100", "192.168.1.100", "192.168.2.31", "192.168.123.1"
         ]
+        
+        # 优先显示最近连接的设备
+        recent_row = 0
+        if self.recent_connections:
+            ttk.Label(preset_frame, text="最近连接:", font=("Microsoft YaHei", 9, "bold"), foreground="#007bff").grid(row=recent_row, column=0, columnspan=4, sticky=tk.W, padx=2, pady=(0, 5))
+            recent_row += 1
+            for i, address in enumerate(self.recent_connections[:4]):  # 最多显示4个
+                ip = address.split(':')[0] if ':' in address else address
+                ttk.Button(preset_frame, text=f"{address} ★", style="Action.TButton",
+                           command=lambda addr=address: (ip_var.set(addr.split(':')[0] if ':' in addr else addr), port_var.set(addr.split(':')[1] if ':' in addr else "5555"))).grid(row=recent_row + i//4, column=i%4, padx=3, pady=3, sticky=(tk.W, tk.E))
+            
+            ttk.Label(preset_frame, text="其他预设:", font=("Microsoft YaHei", 9), foreground="#6c757d").grid(row=recent_row + len(self.recent_connections[:4]), column=0, columnspan=4, sticky=tk.W, padx=2, pady=(10, 5))
+            recent_row += len(self.recent_connections[:4]) + 1
+        
+        # 显示预设IP
         for i, ip in enumerate(preset_ips):
             ttk.Button(preset_frame, text=ip, style="Action.TButton",
-                       command=lambda ip=ip: (ip_var.set(ip), port_var.set("5555"))).grid(row=i//4, column=i%4, padx=3, pady=3, sticky=(tk.W, tk.E))
+                       command=lambda ip=ip: (ip_var.set(ip), port_var.set("5555"))).grid(row=recent_row + i//4, column=i%4, padx=3, pady=3, sticky=(tk.W, tk.E))
 
         # 连接提示
         tips_frame = ttk.LabelFrame(main_frame, text="连接提示", padding="8")
@@ -761,6 +804,9 @@ class ADBGUI:
             def run_connect():
                 try:
                     self.update_status(f"正在连接 {address}...")
+                    self.append_output(f"执行连接命令: {adb_cmd}", "INFO")
+                    
+                    # 第一步：执行连接命令
                     process = subprocess.run(
                         adb_cmd,
                         shell=True,
@@ -776,11 +822,59 @@ class ADBGUI:
                         self.append_output(f"连接错误: {process.stderr.strip()}", "ERROR")
                     
                     # 结果判断
-                    if process.returncode == 0 and "connected to" in process.stdout.lower():
-                        self.update_status(f"成功连接到 {address}")
-                        messagebox.showinfo("成功", f"已连接到设备 {address}", parent=dialog)
-                        dialog.destroy()
-                        self.root.after(1000, self.refresh_devices)
+                    if process.returncode == 0 and ("connected" in process.stdout.lower() or "already connected" in process.stdout.lower()):
+                        self.update_status(f"连接命令执行成功，检查设备状态...")
+                        
+                        # 等待2秒让设备连接稳定
+                        time.sleep(2)
+                        
+                        # 第二步：检查设备是否真的连接成功
+                        check_result = subprocess.run("adb devices -l", shell=True, capture_output=True, text=True, timeout=5)
+                        self.append_output(f"设备列表检查: {check_result.stdout}", "INFO")
+                        
+                        # 检查设备是否在列表中
+                        if address in check_result.stdout:
+                            # 检查设备状态
+                            lines = check_result.stdout.strip().split('\n')
+                            device_found = False
+                            device_unauthorized = False
+                            
+                            for line in lines[1:]:
+                                if line.strip() and '\t' in line:
+                                    parts = line.strip().split('\t')
+                                    if parts[0] == address:
+                                        device_found = True
+                                        if 'unauthorized' in parts[1]:
+                                            device_unauthorized = True
+                                        break
+                            
+                            if device_unauthorized:
+                                self.update_status(f"设备 {address} 已连接但未授权")
+                                messagebox.showwarning(
+                                    "需要授权",
+                                    f"设备 {address} 已连接，但需要在设备上手动授权！\n\n请在设备上点击'允许USB调试'，然后点击刷新设备列表。",
+                                    parent=dialog
+                                )
+                                dialog.destroy()
+                                self.root.after(1000, self.refresh_devices)
+                            elif device_found:
+                                self.update_status(f"成功连接到 {address}")
+                                # 保存到最近连接列表
+                                if address not in self.recent_connections:
+                                    self.recent_connections.insert(0, address)
+                                    if len(self.recent_connections) > 5:  # 只保留最近5个
+                                        self.recent_connections.pop()
+
+                                messagebox.showinfo("成功", f"已连接到设备 {address}", parent=dialog)
+                                dialog.destroy()
+                                self.root.after(1000, self.refresh_devices)
+                        else:
+                            self.update_status(f"设备 {address} 未在列表中")
+                            messagebox.showerror(
+                                "连接失败",
+                                f"设备 {address} 连接命令执行成功，但未在设备列表中找到！\n\n可能原因:\n1. 设备防火墙阻止\n2. 设备IP地址变更\n3. 设备未开启ADB调试\n\n当前设备列表:\n{check_result.stdout}",
+                                parent=dialog
+                            )
                     else:
                         self.update_status(f"连接 {address} 失败")
                         messagebox.showerror("失败", 
@@ -803,39 +897,72 @@ class ADBGUI:
         # 回车触发连接
         dialog.bind('<Return>', lambda e: do_connect())
 
-    def toggle_screen(self):
+    def toggle_screen(self, action=None):
         """切换屏幕状态（息屏/亮屏）"""
         if not self.devices_list:
             messagebox.showinfo("提示", "没有已授权设备可操作")
             return
-        
-        confirm = messagebox.askyesno("确认操作", f"是否对 {len(self.devices_list)} 个设备执行屏幕状态切换？")
-        if not confirm:
-            return
-        
-        self.update_status(f"发送屏幕切换指令到 {len(self.devices_list)} 个设备...")
-        self.append_output(f"批量切换 {len(self.devices_list)} 个设备屏幕状态", "INFO")
-        
-        for device_id in self.devices_list:
-            self.execute_adb_command("shell input keyevent 26", device_id, retry_count=1)
-        
-        self.root.after(1000, lambda: self.update_status("屏幕切换指令发送完成"))
+
+        # 如果没有指定操作，使用原来的切换逻辑
+        if action is None:
+            confirm = messagebox.askyesno("确认操作", f"是否对 {len(self.devices_list)} 个设备执行屏幕状态切换？")
+            if not confirm:
+                return
+
+            self.update_status(f"发送屏幕切换指令到 {len(self.devices_list)} 个设备...")
+            self.append_output(f"批量切换 {len(self.devices_list)} 个设备屏幕状态", "INFO")
+
+            for device_id in self.devices_list:
+                self.execute_adb_command("shell input keyevent 26", device_id, retry_count=1)
+
+            self.root.after(1000, lambda: self.update_status("屏幕切换指令发送完成"))
+        else:
+            # 指定操作：息屏或亮屏
+            if action == "off":
+                action_name = "息屏"
+                confirm = messagebox.askyesno("确认操作", f"是否对 {len(self.devices_list)} 个设备执行息屏操作？")
+            else:  # action == "on"
+                action_name = "亮屏"
+                confirm = messagebox.askyesno("确认操作", f"是否对 {len(self.devices_list)} 个设备执行亮屏操作？")
+
+            if not confirm:
+                return
+
+            self.update_status(f"发送{action_name}指令到 {len(self.devices_list)} 个设备...")
+            self.append_output(f"批量{action_name} {len(self.devices_list)} 个设备", "INFO")
+
+            for device_id in self.devices_list:
+                if action == "off":
+                    # 息屏：先按电源键关闭屏幕
+                    self.execute_adb_command("shell input keyevent 26", device_id, retry_count=1)
+                else:  # action == "on"
+                    # 亮屏：先按电源键唤醒屏幕
+                    self.execute_adb_command("shell input keyevent 26", device_id, retry_count=1)
+
+            self.root.after(1000, lambda: self.update_status(f"{action_name}指令发送完成"))
 
     # ========== 其他原有功能（简化保留） ==========
     def execute_custom_adb_command(self):
         """执行自定义命令"""
         custom_cmd = self.cmd_input_var.get().strip()
+        self.append_output(f"[DEBUG] 获取到的命令: '{custom_cmd}'", "INFO")  # 调试日志
+
         if not custom_cmd:
             messagebox.showwarning("警告", "请输入ADB命令！")
             self.cmd_input_entry.focus()
             return
 
         selected_device = self.cmd_device_var.get()
+        self.append_output(f"[DEBUG] 选中的设备: '{selected_device}'", "INFO")  # 调试日志
+
         device_id = selected_device if selected_device != "所有设备（不指定）" else None
 
         final_cmd = f'adb {custom_cmd}' if not custom_cmd.startswith('adb ') else custom_cmd
         if device_id and '-s' not in final_cmd:
             final_cmd = final_cmd.replace('adb ', f'adb -s {device_id} ', 1)
+
+        self.append_output(f"[DEBUG] 最终命令: '{final_cmd}'", "INFO")  # 调试日志
+        self.append_output(f"[DEBUG] device_id参数: '{device_id}'", "INFO")  # 调试日志
 
         self.execute_adb_command(final_cmd, device_id)
         self.cmd_input_var.set("")
@@ -873,15 +1000,31 @@ class ADBGUI:
         thread.daemon = True
         thread.start()
 
-    def install_apk(self):
-        """安装APK"""
+    def install_apk(self, device=None):
+        """安装APK（支持单个设备或所有设备）"""
+        # 选择要安装的设备
+        if not device:
+            if not self.devices_list:
+                messagebox.showinfo("提示", "没有已授权设备可操作")
+                return
+
+            # 多个设备时选择目标设备
+            if len(self.devices_list) > 1:
+                device = self.ask_select_device()
+                if not device:
+                    return  # 用户取消选择
+            else:
+                device = self.devices_list[0]
+
+        # 选择APK文件
         file_path = filedialog.askopenfilename(
             title="选择APK文件",
             filetypes=[("APK文件", "*.apk"), ("所有文件", "*.*")]
         )
         if file_path:
             file_path = self.normalize_text(file_path)
-            self.execute_adb_command(f'install -r "{file_path}"')
+            self.append_output(f"准备为设备 {device} 安装APK: {file_path}", "INFO")
+            self.execute_adb_command(f'install -r "{file_path}"', device)
 
     def show_board_info_window(self, device):
         """显示设备信息"""
@@ -915,8 +1058,8 @@ class ADBGUI:
                 "Android版本": "getprop ro.build.version.release",
                 "SDK版本": "getprop ro.build.version.sdk",
                 "内核版本": "cat /proc/version",
-                "CPU信息": "cat /proc/cpuinfo | head -20",
-                "内存信息": "cat /proc/meminfo | head -10"
+                "CPU信息": "cat /proc/cpuinfo",
+                "内存信息": "cat /proc/meminfo"
             }
             
             for title, cmd in commands.items():
@@ -930,7 +1073,14 @@ class ADBGUI:
                         timeout=8
                     )
                     if result.returncode == 0:
-                        info_text.insert(tk.END, result.stdout)
+                        # 根据标题截取输出内容
+                        lines = result.stdout.split('\n')
+                        if title == "CPU信息":
+                            info_text.insert(tk.END, '\n'.join(lines[:30]))  # 只显示前30行
+                        elif title == "内存信息":
+                            info_text.insert(tk.END, '\n'.join(lines[:15]))  # 只显示前15行
+                        else:
+                            info_text.insert(tk.END, result.stdout)
                     else:
                         info_text.insert(tk.END, f"获取失败: {result.stderr}", "ERROR")
                 except Exception as e:
