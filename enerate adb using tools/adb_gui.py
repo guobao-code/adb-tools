@@ -693,18 +693,22 @@ class ADBGUI:
     def connect_device(self):
         """IP连接设备（保留原有修复逻辑）"""
         self.ensure_adb_server_running()
-        
+
         dialog = tk.Toplevel(self.root)
         dialog.title("连接无线设备")
         dialog.geometry("480x500")
         dialog.resizable(True, True)
         dialog.transient(self.root)
-        dialog.grab_set()
+
+        # 先更新窗口以确保尺寸信息正确
+        dialog.update_idletasks()
 
         # 居中显示
         x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
         y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
         dialog.geometry(f"+{x}+{y}")
+
+        dialog.grab_set()
 
         main_frame = ttk.Frame(dialog, padding="15")
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -868,6 +872,7 @@ class ADBGUI:
                                 messagebox.showinfo("成功", f"已连接到设备 {address}", parent=dialog)
                                 dialog.destroy()
                                 self.root.after(1000, self.refresh_devices)
+                                return
                         else:
                             self.update_status(f"设备 {address} 未在列表中")
                             messagebox.showerror(
@@ -875,17 +880,23 @@ class ADBGUI:
                                 f"设备 {address} 连接命令执行成功，但未在设备列表中找到！\n\n可能原因:\n1. 设备防火墙阻止\n2. 设备IP地址变更\n3. 设备未开启ADB调试\n\n当前设备列表:\n{check_result.stdout}",
                                 parent=dialog
                             )
+                            dialog.destroy()
+                            return
                     else:
                         self.update_status(f"连接 {address} 失败")
-                        messagebox.showerror("失败", 
-                            f"连接失败！\n命令: {adb_cmd}\n输出: {process.stdout}\n错误: {process.stderr}", 
+                        messagebox.showerror("失败",
+                            f"连接失败！\n命令: {adb_cmd}\n输出: {process.stdout}\n错误: {process.stderr}",
                             parent=dialog)
+                        dialog.destroy()
+                        return
                         
                 except Exception as e:
                     error_msg = f"连接执行异常: {str(e)}"
                     self.append_output(error_msg, "ERROR")
                     self.update_status(f"连接失败: {str(e)}")
                     messagebox.showerror("错误", error_msg, parent=dialog)
+                    dialog.destroy()
+                    return
 
             thread = threading.Thread(target=run_connect)
             thread.daemon = True
