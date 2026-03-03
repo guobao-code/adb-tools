@@ -1,0 +1,215 @@
+{
+	"code": 0,
+	"message": "成功",
+	"data": {
+		"global_config": "自定义运动配置",
+		"sub_config": [
+			{
+				"sport_area": 3,
+				"sport_area_def": [
+					{
+						"area_code": "1-1-1",
+						"area_id": 1
+					},
+					{
+						"area_code": "1-2-1",
+						"area_id": 2
+					},
+					{
+						"area_code": "1-3-1",
+						"area_id": 3
+					}
+				],
+				"id": "E-1-1"
+			},
+			{
+				"sport_area": 1,
+				"sport_area_def": [
+					{
+						"area_code": "1-1-1",
+						"area_id": 1
+					}
+				],
+				"id": "E-1-2"
+			},
+			{
+				"sport_area": 3,
+				"sport_area_def": [
+					{
+						"area_code": "1-1-1",
+						"area_id": 1
+					},
+					{
+						"area_code": "1-2-1",
+						"area_id": 2
+					},
+					{
+						"area_code": "1-3-1",
+						"area_id": 3
+					}
+				],
+				"id": "E-1-3"
+			},
+			{
+				"cd": 60,
+				"category_code": "CDTIMES",
+				"policys": [
+					{
+						"code": "E-1-10-1",
+						"level": [
+							1
+						],
+						"maxflow": 1,
+						"desc": "偏娱乐，都算"
+					},
+					{
+						"code": "E-1-10-2",
+						"level": [
+							1
+						],
+						"maxflow": 1,
+						"desc": "严格版：单脚及不拿绳违规"
+					},
+					{
+						"code": "E-1-10-15",
+						"bg_pic": "false",
+						"level": [
+							1
+						],
+						"desc": "1.5代产品策略"
+					}
+				],
+				"custom": {
+					"delay_go": 3,
+					"delay_power": "on"
+				},
+				"sport_area": 9,
+				"sport_area_def": [
+					{
+						"area_code": "1-1-1",
+						"area_id": 1
+					},
+					{
+						"area_code": "1-1-2",
+						"area_id": 2
+					},
+					{
+						"area_code": "1-1-3",
+						"area_id": 3
+					},
+					{
+						"area_code": "1-2-1",
+						"area_id": 4
+					},
+					{
+						"area_code": "1-2-2",
+						"area_id": 5
+					},
+					{
+						"area_code": "1-2-3",
+						"area_id": 6
+					},
+					{
+						"area_code": "1-3-1",
+						"area_id": 7
+					},
+					{
+						"area_code": "1-3-2",
+						"area_id": 8
+					},
+					{
+						"area_code": "1-3-3",
+						"area_id": 9
+					}
+				],
+				"illegal": [
+					{
+						"internal": "rope_sgl",
+						"code": "E-1-10-1-1",
+						"level": 1,
+						"real": 1,
+						"enabled": true,
+						"desc": "单脚跳绳"
+					},
+					{
+						"internal": "out_of_area",
+						"code": "E-1-10-1-2",
+						"level": 1,
+						"real": -1,
+						"desc": "离开运动区"
+					},
+					{
+						"internal": "not_holding_rope",
+						"code": "E-1-10-1-3",
+						"level": 1,
+						"real": 1,
+						"enabled": false,
+						"desc": "未双手持绳"
+					},
+					{
+						"internal": "trip_rope",
+						"code": "E-1-10-1-4",
+						"level": 1,
+						"real": 3,
+						"desc": "绊绳中断"
+					}
+				],
+				"parentId": "basic",
+				"score_type": "COUNT",
+				"enable": false,
+				"alg_alertor_type": "ropeskipping_multi",
+				"mock": "skiprope_end_of_action",
+				"score_unit": "SINGLE",
+				"checkin_timeout": 60,
+				"lap": {
+					"orchestrations_shuttle_done_index_1_patchtime": 0,
+					"freezeloop": 0,
+					"freezestop": 0,
+					"orchestrations_shuttle_done_index_2_patchtime": 0,
+					"size": 0,
+					"class_n": 0,
+					"facesearch_limit": 65,
+					"freezestart": 0
+				},
+				"id": "E-1-10",
+				"transpose": 0,
+				"uid_null": true,
+				"value": "多人跳绳",
+				"desc": "校园版"
+			},
+			{
+				"lap": {
+					"freezeloop": 20000,
+					"freezestop": 20000,
+					"size": 200,
+					"loop": [
+						200,
+						400,
+						600,
+						800
+					],
+					"facesearch_limit": 65,
+					"freezestart": 20000
+				},
+				"id": "E-2-3"
+			},
+			{
+				"lap": {
+					"freezeloop": 20000,
+					"freezestop": 20000,
+					"size": 200,
+					"loop": [
+						200,
+						400,
+						600,
+						800,
+						1000
+					],
+					"facesearch_limit": 65,
+					"freezestart": 20000
+				},
+				"id": "E-2-4"
+			}
+		]
+	}
+}

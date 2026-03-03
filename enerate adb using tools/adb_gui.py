@@ -15,7 +15,7 @@ class ADBGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("ADB 工具 - 国保增强版")
-        self.root.geometry("1000x750")
+        self.root.geometry("1100x700")
         self.root.minsize(800, 650)
 
         # 根窗口权重配置
@@ -26,7 +26,6 @@ class ADBGUI:
         self.devices_list = []
         self.unauthorized_devices_list = []
         self.device_details = {}  # 存储设备详细信息 {device_id: {"model": "", "ip": "", "type": "wired/wireless"}}
-        self.recent_connections = []  # 存储最近成功连接的设备地址
 
         # 命令队列
         self.command_queue = queue.Queue()
@@ -62,19 +61,21 @@ class ADBGUI:
         # 设备操作按钮
         device_buttons_frame = ttk.Frame(device_top_frame)
         device_buttons_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        for col in range(6):
+        for col in range(7):
             device_buttons_frame.columnconfigure(col, weight=1)
 
         ttk.Button(device_buttons_frame, text="刷新设备列表",
                    command=self.refresh_devices).grid(row=0, column=0, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="连接设备(IP)",
                    command=self.connect_device).grid(row=0, column=1, padx=2, pady=2, sticky=(tk.W, tk.E))
+        ttk.Button(device_buttons_frame, text="工具",
+                   command=self.show_tools_window).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="息屏",
-                   command=lambda: self.toggle_screen("off")).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
+                   command=lambda: self.toggle_screen("off")).grid(row=0, column=3, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="亮屏",
-                   command=lambda: self.toggle_screen("on")).grid(row=0, column=3, padx=2, pady=2, sticky=(tk.W, tk.E))
+                   command=lambda: self.toggle_screen("on")).grid(row=0, column=4, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="重启ADB服务",
-                   command=self.restart_adb_server).grid(row=0, column=4, padx=2, pady=2, sticky=(tk.W, tk.E))
+                   command=self.restart_adb_server).grid(row=0, column=5, padx=2, pady=2, sticky=(tk.W, tk.E))
 
         # 设备搜索过滤
         device_filter_frame = ttk.Frame(device_top_frame)
@@ -91,19 +92,24 @@ class ADBGUI:
         # 设备列表容器（可滚动 + 自适应卡片布局）
         device_list_container = ttk.Frame(device_frame)
         device_list_container.pack(fill=tk.BOTH, expand=True)
-        
+
         # 设备列表滚动区域
         self.device_canvas = tk.Canvas(device_list_container, bg="#f8f9fa", highlightthickness=0)
         device_scrollbar = ttk.Scrollbar(device_list_container, orient="vertical", command=self.device_canvas.yview)
         self.device_scrollable_frame = ttk.Frame(self.device_canvas, style="DeviceCard.TFrame")
-        
+
         self.device_canvas.configure(yscrollcommand=device_scrollbar.set)
-        self.device_canvas.bind("<Configure>", self.on_device_canvas_resize)
         self.device_scrollable_frame.bind("<Configure>", lambda e: self.device_canvas.configure(scrollregion=self.device_canvas.bbox("all")))
-        
+
         canvas_window = self.device_canvas.create_window((0, 0), window=self.device_scrollable_frame, anchor="nw")
         self.device_canvas.bind("<Configure>", lambda e: self.device_canvas.itemconfig(canvas_window, width=e.width))
-        
+
+        # 添加鼠标滚轮支持（Windows）
+        self.device_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        # 添加鼠标滚轮支持（Linux）
+        self.device_canvas.bind_all("<Button-4>", self._on_mousewheel)
+        self.device_canvas.bind_all("<Button-5>", self._on_mousewheel)
+
         self.device_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         device_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
@@ -127,7 +133,7 @@ class ADBGUI:
         output_right_control = ttk.Frame(output_control_frame)
         output_right_control.pack(side=tk.RIGHT)
         
-        ttk.Label(output_right_control, text="级别:").grid(row=0, column=0, padx=2, pady=2)
+        ttk.Label(output_right_control, text="日志分类:").grid(row=0, column=0, padx=2, pady=2)
         level_combobox = ttk.Combobox(output_right_control, textvariable=self.filter_level, width=8, state="readonly")
         level_combobox['values'] = ["ALL", "INFO", "SUCCESS", "WARNING", "ERROR"]
         level_combobox.current(0)
@@ -213,9 +219,14 @@ class ADBGUI:
         style.configure("Action.TButton", font=("Microsoft YaHei", 9), padding=2)
 
     # ========== 设备显示区域优化核心方法 ==========
-    def on_device_canvas_resize(self, event):
-        """设备画布大小变化时重新布局卡片"""
-        self.refresh_devices_display(self.devices_list, self.unauthorized_devices_list)
+
+    def _on_mousewheel(self, event):
+        """处理鼠标滚轮事件"""
+        # Windows系统使用 MouseWheel 事件，event.delta 为正负值
+        if event.num == 4 or event.delta > 0:
+            self.device_canvas.yview_scroll(-1, "units")  # 向上滚动
+        elif event.num == 5 or event.delta < 0:
+            self.device_canvas.yview_scroll(1, "units")   # 向下滚动
 
     def filter_devices_display(self, *args):
         """过滤设备显示"""
@@ -235,124 +246,158 @@ class ADBGUI:
         else:
             filtered_devices = self.devices_list.copy()
             filtered_unauthorized = self.unauthorized_devices_list.copy()
-        
-        self.update_devices_display(filtered_devices, filtered_unauthorized)
+
+        self.root.after(100, self.update_devices_display, filtered_devices, filtered_unauthorized)
 
     def refresh_devices_display(self, devices, unauthorized_devices):
-        """刷新设备显示（自适应卡片布局）"""
-        # 获取画布宽度，计算每行可显示的卡片数
+        """刷新设备显示（每行最多5个卡片）"""
+        self.update_devices_display(devices, unauthorized_devices)
+
+    def update_devices_display(self, devices, unauthorized_devices, cards_per_row=5):
+        """更新设备卡片显示（每行最多5个卡片，多余下排）"""
+        # 清空原有卡片（彻底清空）
+        self.device_scrollable_frame.destroy()
+        self.device_scrollable_frame = ttk.Frame(self.device_canvas, style="DeviceCard.TFrame")
+        canvas_window = self.device_canvas.create_window((0, 0), window=self.device_scrollable_frame, anchor="nw")
+
+        # 重新绑定 Configure 事件
+        self.device_scrollable_frame.bind("<Configure>", lambda e: self.device_canvas.configure(scrollregion=self.device_canvas.bbox("all")))
+
+        # 获取画布宽度
         canvas_width = self.device_canvas.winfo_width()
-        card_width = 280  # 每张卡片固定宽度
-        cards_per_row = max(1, canvas_width // card_width) if canvas_width > 0 else 3
-        
-        # 更新设备显示
-        self.update_devices_display(devices, unauthorized_devices, cards_per_row)
 
-    def update_devices_display(self, devices, unauthorized_devices, cards_per_row=None):
-        """更新设备卡片显示（核心优化）"""
-        # 清空原有卡片
-        for widget in self.device_scrollable_frame.winfo_children():
-            widget.destroy()
+        # 如果画布尺寸未准备好，使用默认值
+        if canvas_width <= 1:
+            canvas_width = 1000
 
-        if cards_per_row is None:
-            canvas_width = self.device_canvas.winfo_width()
-            card_width = 280
-            cards_per_row = max(1, canvas_width // card_width) if canvas_width > 0 else 3
+        # 计算卡片尺寸（每行5个卡片）
+        cards_per_row = 5
+        padding = 2  # 每个卡片左右各1px的padding
+        card_width = (canvas_width - (padding * cards_per_row)) / cards_per_row
+        # 限制最小和最大宽度
+        card_width = max(200, min(card_width, 350))
+
+        # 根据卡片宽度动态调整字体大小
+        if card_width < 220:
+            font_size_title = 9
+            font_size_normal = 7
+            font_size_small = 7
+            font_size_btn = 7
+            pady_text = (0, 2)
+            pady_btn = 0
+            card_height = card_width * 1.1
+        elif card_width < 260:
+            font_size_title = 9
+            font_size_normal = 8
+            font_size_small = 7
+            font_size_btn = 7
+            pady_text = (0, 3)
+            pady_btn = 0
+            card_height = card_width * 1.05
+        else:
+            font_size_title = 10
+            font_size_normal = 9
+            font_size_small = 8
+            font_size_btn = 8
+            pady_text = (0, 3)
+            pady_btn = 1
+            card_height = card_width * 0.95
 
         # 显示已授权设备
         if devices:
             self.device_status_label.config(text=f"已授权设备: {len(devices)} 个 | 未授权设备: {len(unauthorized_devices)} 个", foreground="#28a745")
-            
+
             row = 0
             col = 0
-            
+
             for idx, device_id in enumerate(devices):
                 # 创建设备卡片（美化版）
-                card_frame = ttk.Frame(self.device_scrollable_frame, style="DeviceCard.TFrame", padding="8")
-                card_frame.grid(row=row, column=col, padx=8, pady=8, sticky=(tk.W, tk.E))
-                card_frame.configure(width=260, height=200)  # 增加高度以适应两行按钮
+                card_frame = ttk.Frame(self.device_scrollable_frame, style="DeviceCard.TFrame", padding="6")
+                card_frame.grid(row=row, column=col, padx=2, pady=2, sticky=(tk.W, tk.E))
+                card_frame.configure(width=int(card_width), height=int(card_height))
                 card_frame.grid_propagate(False)  # 固定卡片大小
-                
+
                 # 卡片悬停效果（模拟）
                 card_frame.bind("<Enter>", lambda e, cf=card_frame: cf.configure(style="Hover.TFrame"))
                 card_frame.bind("<Leave>", lambda e, cf=card_frame: cf.configure(style="DeviceCard.TFrame"))
 
                 # 设备ID（标题）
-                device_id_label = ttk.Label(card_frame, text=device_id, font=("Microsoft YaHei", 10, "bold"), wraplength=240)
-                device_id_label.pack(fill=tk.X, pady=(0, 5))
+                device_id_label = ttk.Label(card_frame, text=device_id, font=("Microsoft YaHei", font_size_title, "bold"), wraplength=int(card_width * 0.9))
+                device_id_label.pack(fill=tk.X, pady=pady_text)
 
                 # 设备类型（有线/无线）
                 device_detail = self.device_details.get(device_id, {})
                 dev_type = device_detail.get("type", "未知")
-                dev_type_text = "📶 无线设备" if dev_type == "wireless" else "🔌 有线设备"
-                type_label = ttk.Label(card_frame, text=dev_type_text, font=("Microsoft YaHei", 8), foreground="#6c757d")
-                type_label.pack(fill=tk.X, pady=(0, 3))
+                dev_type_text = "📶 无线" if dev_type == "wireless" else "🔌 有线"
+                type_label = ttk.Label(card_frame, text=dev_type_text, font=("Microsoft YaHei", font_size_small), foreground="#6c757d")
+                type_label.pack(fill=tk.X, pady=pady_text)
 
                 # 设备型号
                 model = device_detail.get("model", "未知型号")
-                model_label = ttk.Label(card_frame, text=f"型号: {model}", font=("Microsoft YaHei", 9), wraplength=240)
-                model_label.pack(fill=tk.X, pady=(0, 3))
+                model_label = ttk.Label(card_frame, text=f"型号: {model}", font=("Microsoft YaHei", font_size_normal), wraplength=int(card_width * 0.9))
+                model_label.pack(fill=tk.X, pady=pady_text)
 
                 # IP地址（仅无线设备）
                 if dev_type == "wireless":
                     ip = device_detail.get("ip", "未知IP")
-                    ip_label = ttk.Label(card_frame, text=f"IP: {ip}", font=("Microsoft YaHei", 9), foreground="#007bff")
-                    ip_label.pack(fill=tk.X, pady=(0, 3))
+                    ip_label = ttk.Label(card_frame, text=f"IP: {ip}", font=("Microsoft YaHei", font_size_normal), foreground="#007bff")
+                    ip_label.pack(fill=tk.X, pady=pady_text)
 
                 # 状态标签
-                status_label = ttk.Label(card_frame, text="✅ 已授权", style="DeviceStatus.Online.TLabel", font=("Microsoft YaHei", 9))
-                status_label.pack(fill=tk.X, pady=(0, 8))
+                status_label = ttk.Label(card_frame, text="✅ 已授权", style="DeviceStatus.Online.TLabel", font=("Microsoft YaHei", font_size_normal))
+                status_label.pack(fill=tk.X, pady=(0, 5))
 
                 # 操作按钮区
                 btn_frame = ttk.Frame(card_frame)
                 btn_frame.pack(fill=tk.X, expand=True)
-                for i in range(5):  # 改为5个按钮
+                for i in range(5):  # 5列布局
                     btn_frame.columnconfigure(i, weight=1)
 
-                # 操作按钮（两行布局，第一行3个，第二行2个）
-                # 第一行
-                ttk.Button(btn_frame, text="断开", style="Action.TButton",
-                           command=lambda d=device_id: self.disconnect_single_device(d)).grid(row=0, column=0, padx=2, pady=2, sticky=(tk.W, tk.E))
-                ttk.Button(btn_frame, text="控制", style="Action.TButton",
-                           command=lambda d=device_id: self.remote_control_device(d)).grid(row=0, column=1, padx=2, pady=2, sticky=(tk.W, tk.E))
-                ttk.Button(btn_frame, text="安装APK", style="Action.TButton",
-                           command=lambda d=device_id: self.install_apk(d)).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
-                # 第二行
-                ttk.Button(btn_frame, text="文件", style="Action.TButton",
-                           command=lambda d=device_id: self.show_file_manager(d)).grid(row=1, column=0, columnspan=2, padx=2, pady=2, sticky=(tk.W, tk.E))
-                ttk.Button(btn_frame, text="信息", style="Action.TButton",
-                           command=lambda d=device_id: self.show_board_info_window(d)).grid(row=1, column=2, columnspan=3, padx=2, pady=2, sticky=(tk.W, tk.E))
+                # 动态创建按钮字体样式
+                style = ttk.Style()
+                btn_font = ("Microsoft YaHei", font_size_btn)
+                style.configure("DynamicAction.TButton", font=btn_font, padding=1)
 
-                # 更新行列位置
+                # 操作按钮（三行布局）
+                # 第一行
+                ttk.Button(btn_frame, text="断开", style="DynamicAction.TButton",
+                           command=lambda d=device_id: self.disconnect_single_device(d)).grid(row=0, column=0, padx=0, pady=pady_btn, sticky=(tk.W, tk.E))
+                ttk.Button(btn_frame, text="控制", style="DynamicAction.TButton",
+                           command=lambda d=device_id: self.remote_control_device(d)).grid(row=0, column=1, padx=0, pady=pady_btn, sticky=(tk.W, tk.E))
+                ttk.Button(btn_frame, text="APK", style="DynamicAction.TButton",
+                           command=lambda d=device_id: self.install_apk(d)).grid(row=0, column=2, padx=0, pady=pady_btn, sticky=(tk.W, tk.E))
+                # 第二行
+                ttk.Button(btn_frame, text="文件", style="DynamicAction.TButton",
+                           command=lambda d=device_id: self.show_file_manager(d)).grid(row=1, column=0, columnspan=2, padx=0, pady=pady_btn, sticky=(tk.W, tk.E))
+                ttk.Button(btn_frame, text="信息", style="DynamicAction.TButton",
+                           command=lambda d=device_id: self.show_board_info_window(d)).grid(row=1, column=2, columnspan=3, padx=0, pady=pady_btn, sticky=(tk.W, tk.E))
+                # 第三行
+                ttk.Button(btn_frame, text="日志", style="DynamicAction.TButton",
+                           command=lambda d=device_id: self.pull_device_logs(d)).grid(row=2, column=0, columnspan=2, padx=0, pady=pady_btn, sticky=(tk.W, tk.E))
+                ttk.Button(btn_frame, text="改IP", style="DynamicAction.TButton",
+                           command=lambda d=device_id: self.modify_device_ip(d)).grid(row=2, column=2, columnspan=3, padx=0, pady=pady_btn, sticky=(tk.W, tk.E))
+
+                # 更新行列位置（每行最多5个）
                 col += 1
                 if col >= cards_per_row:
                     col = 0
                     row += 1
 
-        # 显示未授权设备
-        if unauthorized_devices and (not devices or col != 0):
-            if not devices:
-                row = 0
-                col = 0
-            else:
-                if col > 0:
-                    row += 1
+        # 显示未授权设备（如果有）
+        if unauthorized_devices:
+            # 未授权设备从新行开始
+            if devices and col != 0:
+                row += 1
                 col = 0
 
-            # 未授权设备分组标题
-            group_label = ttk.Label(self.device_scrollable_frame, text="未授权设备", font=("Microsoft YaHei", 10, "bold"), foreground="#ffc107")
-            group_label.grid(row=row, column=0, columnspan=cards_per_row, sticky=tk.W, padx=8, pady=(15, 5))
-            row += 1
-
-            # 未授权设备卡片
             for idx, device_id in enumerate(unauthorized_devices):
                 card_frame = ttk.Frame(self.device_scrollable_frame, style="DeviceCard.TFrame", padding="8")
-                card_frame.grid(row=row, column=col, padx=8, pady=8, sticky=(tk.W, tk.E))
-                card_frame.configure(width=260, height=120)
+                card_frame.grid(row=row, column=col, padx=2, pady=2, sticky=(tk.W, tk.E))
+                card_frame.configure(width=int(card_width), height=int(card_height * 0.52))  # 未授权设备卡片稍矮
                 card_frame.grid_propagate(False)
 
                 # 设备ID
-                device_id_label = ttk.Label(card_frame, text=device_id, font=("Microsoft YaHei", 10, "bold"), wraplength=240)
+                device_id_label = ttk.Label(card_frame, text=device_id, font=("Microsoft YaHei", 10, "bold"), wraplength=int(card_width * 0.9))
                 device_id_label.pack(fill=tk.X, pady=(0, 5))
 
                 # 状态标签
@@ -360,7 +405,7 @@ class ADBGUI:
                 status_label.pack(fill=tk.X, pady=(0, 8))
 
                 # 提示信息
-                tip_label = ttk.Label(card_frame, text="请在设备上允许USB调试授权", font=("Microsoft YaHei", 8), foreground="#6c757d", wraplength=240)
+                tip_label = ttk.Label(card_frame, text="请在设备上允许USB调试授权", font=("Microsoft YaHei", 8), foreground="#6c757d", wraplength=int(card_width * 0.9))
                 tip_label.pack(fill=tk.X, pady=(0, 5))
 
                 # 操作按钮
@@ -369,7 +414,7 @@ class ADBGUI:
                 btn_frame.columnconfigure(0, weight=1)
 
                 ttk.Button(btn_frame, text="断开", style="Action.TButton",
-                           command=lambda d=device_id: self.disconnect_single_device(d)).grid(row=0, column=0, padx=2, pady=2, sticky=(tk.W, tk.E))
+                           command=lambda d=device_id: self.disconnect_single_device(d)).grid(row=0, column=0, padx=1, pady=1, sticky=(tk.W, tk.E))
 
                 # 更新行列位置
                 col += 1
@@ -380,7 +425,7 @@ class ADBGUI:
         # 无设备时的提示
         if not devices and not unauthorized_devices:
             self.device_status_label.config(text="未检测到任何设备", foreground="#6c757d")
-            empty_label = ttk.Label(self.device_scrollable_frame, text="📱 暂无设备连接\n\n请确保：\n1. 设备已开启USB调试\n2. 数据线已正确连接\n3. ADB服务正常运行", 
+            empty_label = ttk.Label(self.device_scrollable_frame, text="📱 暂无设备连接\n\n请确保：\n1. 设备已开启USB调试\n2. 数据线已正确连接\n3. ADB服务正常运行",
                                     font=("Microsoft YaHei", 12), foreground="#6c757d", justify=tk.CENTER)
             empty_label.pack(expand=True, pady=50)
 
@@ -653,8 +698,8 @@ class ADBGUI:
                 self.devices_list = devices
                 self.unauthorized_devices_list = unauthorized_devices
 
-                # 更新UI
-                self.root.after(0, self.refresh_devices_display, devices, unauthorized_devices)
+                # 更新UI（延迟执行，确保画布尺寸已初始化）
+                self.root.after(100, self.refresh_devices_display, devices, unauthorized_devices)
                 self.root.after(0, self._update_cmd_device_combobox, devices)
 
                 # 更新状态
@@ -690,27 +735,704 @@ class ADBGUI:
             self.cmd_device_combobox.current(0)
             self.cmd_device_combobox.config(state="disabled")
 
+    def show_tools_window(self):
+        """显示工具窗口"""
+        # 如果已存在未关闭的dialog，先关闭
+        if hasattr(self, 'tools_dialog') and self.tools_dialog and self.tools_dialog.winfo_exists():
+            try:
+                self.tools_dialog.destroy()
+            except:
+                pass
+
+        # 创建工具窗口
+        self.tools_dialog = tk.Toplevel(self.root)
+        self.tools_dialog.title("工具")
+        self.tools_dialog.geometry("1000x600")
+        self.tools_dialog.resizable(True, True)
+        self.tools_dialog.transient(self.root)
+
+        # 等待窗口创建完成后再计算居中位置
+        self.tools_dialog.update_idletasks()
+
+        # 居中显示
+        x = self.root.winfo_x() + (self.root.winfo_width() - self.tools_dialog.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - self.tools_dialog.winfo_height()) // 2
+        self.tools_dialog.geometry(f"+{x}+{y}")
+
+        # 主框架
+        main_frame = ttk.Frame(self.tools_dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 按钮框架
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # 所有按钮在一行显示
+        for i in range(5):
+            btn_frame.columnconfigure(i, weight=1)
+
+        # 版本按钮
+        ttk.Button(btn_frame, text="版本",
+                   command=lambda: self.get_version_info()).grid(row=0, column=0, padx=2, pady=2, sticky=(tk.W, tk.E))
+
+        # 获取配置按钮
+        ttk.Button(btn_frame, text="获取配置",
+                   command=lambda: self.get_config_info()).grid(row=0, column=1, padx=2, pady=2, sticky=(tk.W, tk.E))
+
+        # 设置配置按钮
+        ttk.Button(btn_frame, text="设置配置",
+                   command=lambda: self.set_config_info()).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
+
+        # 获取自定义按钮
+        ttk.Button(btn_frame, text="获取自定义",
+                   command=lambda: self.get_custom_info()).grid(row=0, column=3, padx=2, pady=2, sticky=(tk.W, tk.E))
+
+        # 设置自定义按钮
+        ttk.Button(btn_frame, text="设置自定义",
+                   command=lambda: self.set_custom_info()).grid(row=0, column=4, padx=2, pady=2, sticky=(tk.W, tk.E))
+
+        # OTA升级按钮
+        ttk.Button(btn_frame, text="OTA升级",
+                   command=lambda: self.ota_upgrade()).grid(row=0, column=5, padx=2, pady=2, sticky=(tk.W, tk.E))
+
+        # 信息显示区域
+        info_frame = ttk.LabelFrame(main_frame, text="信息显示", padding="10")
+        info_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 创建文本框显示信息
+        self.tools_text = tk.Text(info_frame, height=20, width=50, wrap=tk.WORD)
+        self.tools_text.pack(fill=tk.BOTH, expand=True)
+        self.tools_text.insert(tk.END, "点击上方按钮获取信息...")
+        self.tools_text.config(state=tk.DISABLED)
+
+        # 关闭按钮
+        ttk.Button(main_frame, text="关闭",
+                   command=self.tools_dialog.destroy).pack(fill=tk.X, pady=(10, 0))
+
+    def get_version_info(self):
+        """获取版本信息"""
+        self.tools_text.config(state=tk.NORMAL)
+        self.tools_text.delete(1.0, tk.END)
+        self.tools_text.insert(tk.END, "正在获取版本信息...\n")
+        self.tools_text.update()
+
+        try:
+            import requests
+
+            url = "http://192.168.77.2:8080/api/v1/ops/version"
+            headers = {
+                'REQUEST-WITHOUT-AUTHORIZE': 'true'
+            }
+            cookies = {
+                'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
+            }
+
+            response = requests.get(url, headers=headers, cookies=cookies, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                if data.get('code') == 0:
+                    version_data = data.get('data', {})
+
+                    # Display as JSON format with proper formatting
+                    import json
+                    result = json.dumps(version_data, indent=4, ensure_ascii=False)
+
+                    self.tools_text.delete(1.0, tk.END)
+                    self.tools_text.insert(tk.END, result)
+                else:
+                    self.tools_text.delete(1.0, tk.END)
+                    self.tools_text.insert(tk.END, f"获取失败: {data.get('message', '未知错误')}")
+            else:
+                self.tools_text.delete(1.0, tk.END)
+                self.tools_text.insert(tk.END, f"请求失败: HTTP {response.status_code}")
+
+        except requests.exceptions.Timeout:
+            self.tools_text.delete(1.0, tk.END)
+            self.tools_text.insert(tk.END, "请求超时，请检查网络连接")
+        except requests.exceptions.ConnectionError:
+            self.tools_text.delete(1.0, tk.END)
+            self.tools_text.insert(tk.END, "连接失败，请检查服务器地址和端口")
+        except Exception as e:
+            self.tools_text.delete(1.0, tk.END)
+            self.tools_text.insert(tk.END, f"发生错误: {str(e)}")
+
+        self.tools_text.config(state=tk.DISABLED)
+
+    def get_config_info(self):
+        """获取配置信息"""
+        self.tools_text.config(state=tk.NORMAL)
+        self.tools_text.delete(1.0, tk.END)
+        self.tools_text.insert(tk.END, "正在获取配置信息...\n")
+        self.tools_text.update()
+
+        try:
+            import requests
+
+            url = "http://192.168.77.2:8080/api/v1/ops/internal/training/sport/configs/8oHftycwh79693Jpq4TB"
+            headers = {
+                'REQUEST-WITHOUT-AUTHORIZE': 'true'
+            }
+            cookies = {
+                'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
+            }
+
+            response = requests.get(url, headers=headers, cookies=cookies, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                if data.get('code') == 0:
+                    config_data = data.get('data', {})
+
+                    # Display as JSON format with proper formatting
+                    import json
+                    result = json.dumps(config_data, indent=4, ensure_ascii=False)
+
+                    self.tools_text.delete(1.0, tk.END)
+                    self.tools_text.insert(tk.END, result)
+                else:
+                    self.tools_text.delete(1.0, tk.END)
+                    self.tools_text.insert(tk.END, f"获取失败: {data.get('message', '未知错误')}")
+            else:
+                self.tools_text.delete(1.0, tk.END)
+                self.tools_text.insert(tk.END, f"请求失败: HTTP {response.status_code}")
+
+        except requests.exceptions.Timeout:
+            self.tools_text.delete(1.0, tk.END)
+            self.tools_text.insert(tk.END, "请求超时，请检查网络连接")
+        except requests.exceptions.ConnectionError:
+            self.tools_text.delete(1.0, tk.END)
+            self.tools_text.insert(tk.END, "连接失败，请检查服务器地址和端口")
+        except Exception as e:
+            self.tools_text.delete(1.0, tk.END)
+            self.tools_text.insert(tk.END, f"发生错误: {str(e)}")
+
+        self.tools_text.config(state=tk.DISABLED)
+
+    def set_config_info(self):
+        """设置配置信息"""
+        # 读取默认配置文件
+        import json
+        import os
+
+        config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "设置json.json")
+
+        default_content = ""
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    default_content = f.read()
+            except Exception as e:
+                default_content = f"读取配置文件失败: {str(e)}"
+
+        # 创建设置配置窗口
+        set_config_dialog = tk.Toplevel(self.tools_dialog)
+        set_config_dialog.title("设置配置")
+        set_config_dialog.geometry("900x600")
+        set_config_dialog.resizable(True, True)
+        set_config_dialog.transient(self.tools_dialog)
+
+        # 居中显示
+        set_config_dialog.update_idletasks()
+        x = self.tools_dialog.winfo_x() + (self.tools_dialog.winfo_width() - set_config_dialog.winfo_width()) // 2
+        y = self.tools_dialog.winfo_y() + (self.tools_dialog.winfo_height() - set_config_dialog.winfo_height()) // 2
+        set_config_dialog.geometry(f"+{x}+{y}")
+
+        # 主框架
+        main_frame = ttk.Frame(set_config_dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 输入框框架
+        input_frame = ttk.LabelFrame(main_frame, text="配置内容(JSON格式)", padding="10")
+        input_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 创建文本编辑框
+        config_text = tk.Text(input_frame, height=25, wrap=tk.WORD)
+        config_text.pack(fill=tk.BOTH, expand=True)
+        if default_content:
+            config_text.insert(tk.END, default_content)
+
+        # 滚动条
+        scrollbar = ttk.Scrollbar(input_frame, orient="vertical", command=config_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        config_text.configure(yscrollcommand=scrollbar.set)
+
+        # 按钮框架
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=1)
+
+        def do_set_config():
+            """执行设置配置"""
+            config_content = config_text.get(1.0, tk.END).strip()
+
+            if not config_content:
+                messagebox.showerror("错误", "请输入配置内容", parent=set_config_dialog)
+                return
+
+            # 验证JSON格式
+            try:
+                json_data = json.loads(config_content)
+            except json.JSONDecodeError as e:
+                messagebox.showerror("错误", f"JSON格式错误: {str(e)}", parent=set_config_dialog)
+                return
+
+            # 发送POST请求
+            try:
+                import requests
+
+                url = "http://192.168.77.2:8080/api/v1/ops/internal/training/sport/configs/8oHftycwh79693Jpq4TB"
+                headers = {
+                    'REQUEST-WITHOUT-AUTHORIZE': 'true',
+                    'Content-Type': 'application/json'
+                }
+                cookies = {
+                    'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
+                }
+
+                # 显示进度
+                config_text.delete(1.0, tk.END)
+                config_text.insert(tk.END, "正在设置配置...\n")
+                config_text.update()
+
+                response = requests.post(url, json=json_data, headers=headers, cookies=cookies, timeout=30)
+
+                # 显示结果
+                result_json = response.json()
+                result_text = json.dumps(result_json, indent=4, ensure_ascii=False)
+
+                config_text.delete(1.0, tk.END)
+                config_text.insert(tk.END, result_text)
+
+                # 显示成功提示
+                if result_json.get('code') == 0:
+                    messagebox.showinfo("成功", "配置设置成功！", parent=set_config_dialog)
+                else:
+                    messagebox.showwarning("警告", f"设置失败: {result_json.get('message', '未知错误')}", parent=set_config_dialog)
+
+            except requests.exceptions.Timeout:
+                messagebox.showerror("错误", "请求超时，请检查网络连接", parent=set_config_dialog)
+                config_text.delete(1.0, tk.END)
+                config_text.insert(tk.END, "请求超时")
+            except requests.exceptions.ConnectionError:
+                messagebox.showerror("错误", "连接失败，请检查服务器地址和端口", parent=set_config_dialog)
+                config_text.delete(1.0, tk.END)
+                config_text.insert(tk.END, "连接失败")
+            except Exception as e:
+                messagebox.showerror("错误", f"发生错误: {str(e)}", parent=set_config_dialog)
+                config_text.delete(1.0, tk.END)
+                config_text.insert(tk.END, f"错误: {str(e)}")
+
+        # 设置按钮
+        ttk.Button(btn_frame, text="设置",
+                   command=do_set_config).grid(row=0, column=0, padx=(0, 5), sticky=(tk.W, tk.E))
+
+        # 关闭按钮
+        ttk.Button(btn_frame, text="关闭",
+                   command=set_config_dialog.destroy).grid(row=0, column=1, padx=(5, 0), sticky=(tk.W, tk.E))
+
+    def get_custom_info(self):
+        """获取自定义配置信息"""
+        self.tools_text.config(state=tk.NORMAL)
+        self.tools_text.delete(1.0, tk.END)
+        self.tools_text.insert(tk.END, "正在获取自定义配置信息...\n")
+        self.tools_text.update()
+
+        try:
+            import requests
+
+            url = "http://192.168.77.2:8080/api/v1/ops/training/sport/custom/get"
+            headers = {
+                'REQUEST-WITHOUT-AUTHORIZE': 'true'
+            }
+            cookies = {
+                'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
+            }
+
+            response = requests.get(url, headers=headers, cookies=cookies, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                # Display as JSON format with proper formatting
+                import json
+                result = json.dumps(data, indent=4, ensure_ascii=False)
+
+                self.tools_text.delete(1.0, tk.END)
+                self.tools_text.insert(tk.END, result)
+            else:
+                self.tools_text.delete(1.0, tk.END)
+                self.tools_text.insert(tk.END, f"请求失败: HTTP {response.status_code}")
+
+        except requests.exceptions.Timeout:
+            self.tools_text.delete(1.0, tk.END)
+            self.tools_text.insert(tk.END, "请求超时，请检查网络连接")
+        except requests.exceptions.ConnectionError:
+            self.tools_text.delete(1.0, tk.END)
+            self.tools_text.insert(tk.END, "连接失败，请检查服务器地址和端口")
+        except Exception as e:
+            self.tools_text.delete(1.0, tk.END)
+            self.tools_text.insert(tk.END, f"发生错误: {str(e)}")
+
+        self.tools_text.config(state=tk.DISABLED)
+
+    def set_custom_info(self):
+        """设置自定义配置信息"""
+        # 读取默认配置文件
+        import json
+        import os
+
+        config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "设置自定义.json")
+
+        default_content = ""
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    # 读取JSON data部分（去除curl命令部分）
+                    content = f.read()
+                    # 查找第一个{的位置
+                    start_idx = content.find('{')
+                    if start_idx != -1:
+                        # 提取JSON部分
+                        json_content = content[start_idx:].strip()
+                        # 去除末尾的单引号（如果有）
+                        if json_content.endswith("'"):
+                            json_content = json_content[:-1]
+                        default_content = json_content
+                    else:
+                        default_content = f"读取配置文件失败: 未找到JSON数据"
+            except Exception as e:
+                default_content = f"读取配置文件失败: {str(e)}"
+
+        # 创建设置自定义配置窗口
+        set_custom_dialog = tk.Toplevel(self.tools_dialog)
+        set_custom_dialog.title("设置自定义配置")
+        set_custom_dialog.geometry("900x600")
+        set_custom_dialog.resizable(True, True)
+        set_custom_dialog.transient(self.tools_dialog)
+
+        # 居中显示
+        set_custom_dialog.update_idletasks()
+        x = self.tools_dialog.winfo_x() + (self.tools_dialog.winfo_width() - set_custom_dialog.winfo_width()) // 2
+        y = self.tools_dialog.winfo_y() + (self.tools_dialog.winfo_height() - set_custom_dialog.winfo_height()) // 2
+        set_custom_dialog.geometry(f"+{x}+{y}")
+
+        # 主框架
+        main_frame = ttk.Frame(set_custom_dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 输入框框架
+        input_frame = ttk.LabelFrame(main_frame, text="自定义配置内容(JSON格式)", padding="10")
+        input_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 创建文本编辑框
+        custom_text = tk.Text(input_frame, height=25, wrap=tk.WORD)
+        custom_text.pack(fill=tk.BOTH, expand=True)
+        if default_content:
+            custom_text.insert(tk.END, default_content)
+
+        # 滚动条
+        scrollbar = ttk.Scrollbar(input_frame, orient="vertical", command=custom_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        custom_text.configure(yscrollcommand=scrollbar.set)
+
+        # 按钮框架
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=1)
+
+        def do_set_custom():
+            """执行设置自定义配置"""
+            config_content = custom_text.get(1.0, tk.END).strip()
+
+            if not config_content:
+                messagebox.showerror("错误", "请输入自定义配置内容", parent=set_custom_dialog)
+                return
+
+            # 验证JSON格式
+            try:
+                json_data = json.loads(config_content)
+            except json.JSONDecodeError as e:
+                messagebox.showerror("错误", f"JSON格式错误: {str(e)}", parent=set_custom_dialog)
+                return
+
+            # 发送POST请求
+            try:
+                import requests
+
+                url = "http://192.168.77.2:8080/api/v1/ops/training/sport/custom/set?="
+                headers = {
+                    'REQUEST-WITHOUT-AUTHORIZE': 'true',
+                    'Content-Type': 'application/json'
+                }
+                cookies = {
+                    'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
+                }
+
+                # 显示进度
+                custom_text.delete(1.0, tk.END)
+                custom_text.insert(tk.END, "正在设置自定义配置...\n")
+                custom_text.update()
+
+                response = requests.post(url, json=json_data, headers=headers, cookies=cookies, timeout=30)
+
+                # 显示结果
+                result_json = response.json()
+                result_text = json.dumps(result_json, indent=4, ensure_ascii=False)
+
+                custom_text.delete(1.0, tk.END)
+                custom_text.insert(tk.END, result_text)
+
+                # 显示成功提示
+                if result_json.get('code') == 0:
+                    messagebox.showinfo("成功", "自定义配置设置成功！", parent=set_custom_dialog)
+                else:
+                    messagebox.showwarning("警告", f"设置失败: {result_json.get('message', '未知错误')}", parent=set_custom_dialog)
+
+            except requests.exceptions.Timeout:
+                messagebox.showerror("错误", "请求超时，请检查网络连接", parent=set_custom_dialog)
+                custom_text.delete(1.0, tk.END)
+                custom_text.insert(tk.END, "请求超时")
+            except requests.exceptions.ConnectionError:
+                messagebox.showerror("错误", "连接失败，请检查服务器地址和端口", parent=set_custom_dialog)
+                custom_text.delete(1.0, tk.END)
+                custom_text.insert(tk.END, "连接失败")
+            except Exception as e:
+                messagebox.showerror("错误", f"发生错误: {str(e)}", parent=set_custom_dialog)
+                custom_text.delete(1.0, tk.END)
+                custom_text.insert(tk.END, f"错误: {str(e)}")
+
+        # 设置按钮
+        ttk.Button(btn_frame, text="设置",
+                   command=do_set_custom).grid(row=0, column=0, padx=(0, 5), sticky=(tk.W, tk.E))
+
+        # 关闭按钮
+        ttk.Button(btn_frame, text="关闭",
+                   command=set_custom_dialog.destroy).grid(row=0, column=1, padx=(5, 0), sticky=(tk.W, tk.E))
+
+    def ota_upgrade(self):
+        """OTA升级功能"""
+        # 创建OTA升级窗口
+        ota_dialog = tk.Toplevel(self.tools_dialog)
+        ota_dialog.title("OTA升级")
+        ota_dialog.geometry("600x400")
+        ota_dialog.resizable(False, False)
+        ota_dialog.transient(self.tools_dialog)
+
+        # 居中显示
+        ota_dialog.update_idletasks()
+        x = self.tools_dialog.winfo_x() + (self.tools_dialog.winfo_width() - ota_dialog.winfo_width()) // 2
+        y = self.tools_dialog.winfo_y() + (self.tools_dialog.winfo_height() - ota_dialog.winfo_height()) // 2
+        ota_dialog.geometry(f"+{x}+{y}")
+
+        # 主框架
+        main_frame = ttk.Frame(ota_dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # IV输入框
+        ttk.Label(main_frame, text="IV:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        iv_var = tk.StringVar()
+        iv_entry = ttk.Entry(main_frame, textvariable=iv_var, width=50)
+        iv_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5, padx=(10, 0))
+
+        # Key输入框
+        ttk.Label(main_frame, text="Key:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        key_var = tk.StringVar()
+        key_entry = ttk.Entry(main_frame, textvariable=key_var, width=50)
+        key_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=5, padx=(10, 0))
+
+        # 升级包文件选择框
+        ttk.Label(main_frame, text="升级包文件:").grid(row=2, column=0, sticky=tk.W, pady=5)
+
+        package_frame = ttk.Frame(main_frame)
+        package_frame.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5, padx=(10, 0))
+        package_frame.columnconfigure(0, weight=1)
+
+        package_var = tk.StringVar()
+        package_entry = ttk.Entry(package_frame, textvariable=package_var, width=40)
+        package_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        def browse_file():
+            from tkinter import filedialog
+            filename = filedialog.askopenfilename(
+                title="选择升级包文件",
+                filetypes=[("Upgrade Package", "*"), ("All Files", "*.*")]
+            )
+            if filename:
+                package_var.set(filename)
+
+        ttk.Button(package_frame, text="浏览...",
+                   command=browse_file).pack(side=tk.LEFT, padx=(5, 0))
+
+        main_frame.columnconfigure(1, weight=1)
+
+        # 结果显示区域
+        result_frame = ttk.LabelFrame(main_frame, text="升级结果", padding="10")
+        result_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(15, 0))
+        result_frame.columnconfigure(0, weight=1)
+
+        result_text = tk.Text(result_frame, height=8, wrap=tk.WORD)
+        result_text.pack(fill=tk.BOTH, expand=True)
+        result_text.insert(tk.END, "等待升级...")
+        result_text.config(state=tk.DISABLED)
+
+        # 滚动条
+        result_scrollbar = ttk.Scrollbar(result_frame, orient="vertical", command=result_text.yview)
+        result_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        result_text.configure(yscrollcommand=result_scrollbar.set)
+
+        # 按钮框架
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.grid(row=4, column=0, columnspan=2, pady=(15, 0), sticky=(tk.W, tk.E))
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=1)
+
+        def do_upgrade():
+            """执行OTA升级"""
+            iv = iv_var.get().strip()
+            key = key_var.get().strip()
+            package_path = package_var.get().strip()
+
+            if not iv or not key:
+                messagebox.showerror("错误", "请输入IV和Key", parent=ota_dialog)
+                return
+
+            if not package_path:
+                messagebox.showerror("错误", "请选择升级包文件", parent=ota_dialog)
+                return
+
+            # 检查文件是否存在
+            import os
+            if not os.path.exists(package_path):
+                messagebox.showerror("错误", "升级包文件不存在", parent=ota_dialog)
+                return
+
+            # 读取文件内容
+            try:
+                with open(package_path, 'rb') as f:
+                    file_content = f.read()
+            except Exception as e:
+                messagebox.showerror("错误", f"读取文件失败: {str(e)}", parent=ota_dialog)
+                return
+
+            # 显示进度
+            result_text.config(state=tk.NORMAL)
+            result_text.delete(1.0, tk.END)
+            result_text.insert(tk.END, "正在执行OTA升级...\n")
+            result_text.insert(tk.END, f"IV: {iv}\n")
+            result_text.insert(tk.END, f"Key: {key}\n")
+            result_text.insert(tk.END, f"文件: {os.path.basename(package_path)}\n")
+            result_text.insert(tk.END, f"文件大小: {len(file_content)} 字节\n\n")
+            result_text.config(state=tk.DISABLED)
+            result_text.update()
+
+            # 发送升级请求
+            try:
+                import requests
+
+                # 使用正确的URL格式
+                url = "http://192.168.77.2:8080/api/v1/ops/ota/upgrade"
+                headers = {
+                    'REQUEST-WITHOUT-AUTHORIZE': 'true',
+                    'Content-Type': 'multipart/form-data'
+                }
+                cookies = {
+                    'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
+                }
+
+                # 准备文件和数据
+                files = {
+                    'upgrade_package': (os.path.basename(package_path), file_content, 'application/octet-stream')
+                }
+                data = {
+                    'iv': iv,
+                    'key': key
+                }
+
+                # 更新显示
+                result_text.config(state=tk.NORMAL)
+                result_text.insert(tk.END, "正在发送升级请求...\n")
+                result_text.config(state=tk.DISABLED)
+                result_text.update()
+
+                # 发送请求
+                response = requests.post(url, files=files, data=data, headers=headers, cookies=cookies, timeout=300)
+
+                # 显示结果
+                result_json = response.json()
+                result_text.config(state=tk.NORMAL)
+                result_text.delete(1.0, tk.END)
+                result_text.insert(tk.END, "OTA升级完成\n\n")
+                result_text.insert(tk.END, json.dumps(result_json, indent=4, ensure_ascii=False))
+                result_text.config(state=tk.DISABLED)
+
+                # 显示成功提示
+                if result_json.get('code') == 0:
+                    messagebox.showinfo("成功", "OTA升级成功！", parent=ota_dialog)
+                else:
+                    messagebox.showwarning("警告", f"OTA升级失败: {result_json.get('message', '未知错误')}", parent=ota_dialog)
+
+            except requests.exceptions.Timeout:
+                result_text.config(state=tk.NORMAL)
+                result_text.delete(1.0, tk.END)
+                result_text.insert(tk.END, "请求超时，请检查网络连接")
+                result_text.config(state=tk.DISABLED)
+                messagebox.showerror("错误", "请求超时，请检查网络连接", parent=ota_dialog)
+            except requests.exceptions.ConnectionError:
+                result_text.config(state=tk.NORMAL)
+                result_text.delete(1.0, tk.END)
+                result_text.insert(tk.END, "连接失败，请检查服务器地址和端口")
+                result_text.config(state=tk.DISABLED)
+                messagebox.showerror("错误", "连接失败，请检查服务器地址和端口", parent=ota_dialog)
+            except Exception as e:
+                result_text.config(state=tk.NORMAL)
+                result_text.delete(1.0, tk.END)
+                result_text.insert(tk.END, f"错误: {str(e)}")
+                result_text.config(state=tk.DISABLED)
+                messagebox.showerror("错误", f"发生错误: {str(e)}", parent=ota_dialog)
+
+        # 升级按钮
+        ttk.Button(btn_frame, text="升级",
+                   command=do_upgrade).grid(row=0, column=0, padx=(0, 5), sticky=(tk.W, tk.E))
+
+        # 关闭按钮
+        ttk.Button(btn_frame, text="关闭",
+                   command=ota_dialog.destroy).grid(row=0, column=1, padx=(5, 0), sticky=(tk.W, tk.E))
+
     def connect_device(self):
         """IP连接设备（保留原有修复逻辑）"""
         self.ensure_adb_server_running()
 
-        dialog = tk.Toplevel(self.root)
-        dialog.title("连接无线设备")
-        dialog.geometry("480x500")
-        dialog.resizable(True, True)
-        dialog.transient(self.root)
+        # 如果已存在未关闭的dialog，先关闭
+        if hasattr(self, 'connect_dialog') and self.connect_dialog and self.connect_dialog.winfo_exists():
+            try:
+                self.connect_dialog.destroy()
+            except:
+                pass
+
+        # 创建新的dialog
+        self.connect_dialog = tk.Toplevel(self.root)
+        self.connect_dialog.title("连接无线设备")
+        self.connect_dialog.geometry("480x500")
+        self.connect_dialog.resizable(True, True)
+        self.connect_dialog.transient(self.root)
 
         # 先更新窗口以确保尺寸信息正确
-        dialog.update_idletasks()
+        self.connect_dialog.update_idletasks()
 
         # 居中显示
-        x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
-        dialog.geometry(f"+{x}+{y}")
+        x = self.root.winfo_x() + (self.root.winfo_width() - self.connect_dialog.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - self.connect_dialog.winfo_height()) // 2
+        self.connect_dialog.geometry(f"+{x}+{y}")
 
-        dialog.grab_set()
+        # 暂时注释掉 grab_set，测试是否阻止了关闭
+        # self.connect_dialog.grab_set()
 
-        main_frame = ttk.Frame(dialog, padding="15")
+        main_frame = ttk.Frame(self.connect_dialog, padding="15")
         main_frame.pack(fill=tk.BOTH, expand=True)
         main_frame.columnconfigure(1, weight=1)
 
@@ -734,27 +1456,14 @@ class ADBGUI:
         preset_frame.columnconfigure((0,1,2,3), weight=1)
 
         preset_ips = [
-            "10.0.0.2", "10.0.0.3", "10.0.0.4", "10.0.0.5",
+            "10.0.0.2", "10.0.0.3", "10.0.0.4", "192.168.77.1",
             "10.0.0.100", "192.168.1.100", "192.168.2.31", "192.168.123.1"
         ]
-        
-        # 优先显示最近连接的设备
-        recent_row = 0
-        if self.recent_connections:
-            ttk.Label(preset_frame, text="最近连接:", font=("Microsoft YaHei", 9, "bold"), foreground="#007bff").grid(row=recent_row, column=0, columnspan=4, sticky=tk.W, padx=2, pady=(0, 5))
-            recent_row += 1
-            for i, address in enumerate(self.recent_connections[:4]):  # 最多显示4个
-                ip = address.split(':')[0] if ':' in address else address
-                ttk.Button(preset_frame, text=f"{address} ★", style="Action.TButton",
-                           command=lambda addr=address: (ip_var.set(addr.split(':')[0] if ':' in addr else addr), port_var.set(addr.split(':')[1] if ':' in addr else "5555"))).grid(row=recent_row + i//4, column=i%4, padx=3, pady=3, sticky=(tk.W, tk.E))
-            
-            ttk.Label(preset_frame, text="其他预设:", font=("Microsoft YaHei", 9), foreground="#6c757d").grid(row=recent_row + len(self.recent_connections[:4]), column=0, columnspan=4, sticky=tk.W, padx=2, pady=(10, 5))
-            recent_row += len(self.recent_connections[:4]) + 1
-        
+
         # 显示预设IP
         for i, ip in enumerate(preset_ips):
             ttk.Button(preset_frame, text=ip, style="Action.TButton",
-                       command=lambda ip=ip: (ip_var.set(ip), port_var.set("5555"))).grid(row=recent_row + i//4, column=i%4, padx=3, pady=3, sticky=(tk.W, tk.E))
+                       command=lambda ip=ip: (ip_var.set(ip), port_var.set("5555"))).grid(row=0 + i//4, column=i%4, padx=3, pady=3, sticky=(tk.W, tk.E))
 
         # 连接提示
         tips_frame = ttk.LabelFrame(main_frame, text="连接提示", padding="8")
@@ -778,7 +1487,7 @@ class ADBGUI:
             port = port_var.get().strip()
 
             if not ip:
-                messagebox.showwarning("警告", "请输入设备IP地址！", parent=dialog)
+                messagebox.showwarning("警告", "请输入设备IP地址！", parent=self.connect_dialog)
                 return
 
             if not port:
@@ -796,7 +1505,7 @@ class ADBGUI:
                 result = messagebox.askyesno(
                     "网络检测提示",
                     f"未检测到 {ip}:{port} 的网络连接\n可能是防火墙/设备未就绪\n是否继续尝试连接？",
-                    parent=dialog
+                    parent=self.connect_dialog
                 )
                 if not result:
                     return
@@ -809,7 +1518,7 @@ class ADBGUI:
                 try:
                     self.update_status(f"正在连接 {address}...")
                     self.append_output(f"执行连接命令: {adb_cmd}", "INFO")
-                    
+
                     # 第一步：执行连接命令
                     process = subprocess.run(
                         adb_cmd,
@@ -818,84 +1527,110 @@ class ADBGUI:
                         text=True,
                         timeout=20
                     )
-                    
+
                     # 输出结果
                     if process.stdout:
                         self.append_output(f"连接结果: {process.stdout.strip()}", "SUCCESS" if "connected" in process.stdout else "ERROR")
                     if process.stderr:
                         self.append_output(f"连接错误: {process.stderr.strip()}", "ERROR")
-                    
+
                     # 结果判断
                     if process.returncode == 0 and ("connected" in process.stdout.lower() or "already connected" in process.stdout.lower()):
                         self.update_status(f"连接命令执行成功，检查设备状态...")
-                        
+
                         # 等待2秒让设备连接稳定
                         time.sleep(2)
-                        
+
                         # 第二步：检查设备是否真的连接成功
                         check_result = subprocess.run("adb devices -l", shell=True, capture_output=True, text=True, timeout=5)
                         self.append_output(f"设备列表检查: {check_result.stdout}", "INFO")
-                        
+
                         # 检查设备是否在列表中
                         if address in check_result.stdout:
+                            self.append_output(f"[DEBUG] 设备 {address} 在列表中找到，检查状态...", "INFO")
                             # 检查设备状态
                             lines = check_result.stdout.strip().split('\n')
                             device_found = False
                             device_unauthorized = False
-                            
+
                             for line in lines[1:]:
-                                if line.strip() and '\t' in line:
-                                    parts = line.strip().split('\t')
+                                if line.strip():
+                                    # 尝试用制表符分割，如果没有则用空格分割
+                                    if '\t' in line:
+                                        parts = line.strip().split('\t')
+                                    else:
+                                        parts = line.strip().split()
+                                    self.append_output(f"[DEBUG] 解析行: {line[:80]}", "INFO")
+                                    self.append_output(f"[DEBUG] parts[0]={parts[0]}, parts[1]={parts[1] if len(parts) > 1 else 'N/A'}", "INFO")
                                     if parts[0] == address:
                                         device_found = True
-                                        if 'unauthorized' in parts[1]:
+                                        self.append_output(f"[DEBUG] 设备状态: {parts[1]}", "INFO")
+                                        if len(parts) > 1 and 'unauthorized' in parts[1]:
                                             device_unauthorized = True
                                         break
-                            
+                            self.append_output(f"[DEBUG] device_found={device_found}, device_unauthorized={device_unauthorized}", "INFO")
+
                             if device_unauthorized:
                                 self.update_status(f"设备 {address} 已连接但未授权")
-                                messagebox.showwarning(
+                                # 直接在主线程关闭弹窗
+                                self.root.after(0, self.connect_dialog.destroy)
+                                # 显示授权提示
+                                self.root.after(100, lambda: messagebox.showwarning(
                                     "需要授权",
                                     f"设备 {address} 已连接，但需要在设备上手动授权！\n\n请在设备上点击'允许USB调试'，然后点击刷新设备列表。",
-                                    parent=dialog
-                                )
-                                dialog.destroy()
-                                self.root.after(1000, self.refresh_devices)
+                                    parent=self.root
+                                ))
+                                self.root.after(200, self.refresh_devices)
                             elif device_found:
                                 self.update_status(f"成功连接到 {address}")
-                                # 保存到最近连接列表
-                                if address not in self.recent_connections:
-                                    self.recent_connections.insert(0, address)
-                                    if len(self.recent_connections) > 5:  # 只保留最近5个
-                                        self.recent_connections.pop()
+                                # 调试日志
+                                self.append_output(f"[DEBUG] 准备关闭弹窗，dialog对象: {self.connect_dialog}", "INFO")
+                                self.append_output(f"[DEBUG] dialog是否存活: {self.connect_dialog.winfo_exists()}", "INFO")
 
-                                messagebox.showinfo("成功", f"已连接到设备 {address}", parent=dialog)
-                                dialog.destroy()
-                                self.root.after(1000, self.refresh_devices)
+                                # 直接在主线程关闭弹窗
+                                def close_dialog_and_refresh():
+                                    try:
+                                        self.append_output(f"[DEBUG] 开始关闭弹窗", "INFO")
+                                        self.connect_dialog.destroy()
+                                        self.append_output(f"[DEBUG] 弹窗已关闭", "SUCCESS")
+                                    except Exception as e:
+                                        self.append_output(f"[DEBUG] 关闭弹窗失败: {str(e)}", "ERROR")
+
+                                self.root.after(0, close_dialog_and_refresh)
+                                # 刷新设备列表
+                                self.root.after(100, self.refresh_devices)
+                                # 显示成功提示
+                                self.root.after(300, lambda: messagebox.showinfo("成功", f"已连接到设备 {address}", parent=self.root))
                                 return
                         else:
                             self.update_status(f"设备 {address} 未在列表中")
-                            messagebox.showerror(
+                            # 直接在主线程关闭弹窗
+                            self.root.after(0, self.connect_dialog.destroy)
+                            # 延迟显示错误提示
+                            self.root.after(100, lambda: messagebox.showerror(
                                 "连接失败",
                                 f"设备 {address} 连接命令执行成功，但未在设备列表中找到！\n\n可能原因:\n1. 设备防火墙阻止\n2. 设备IP地址变更\n3. 设备未开启ADB调试\n\n当前设备列表:\n{check_result.stdout}",
-                                parent=dialog
-                            )
-                            dialog.destroy()
+                                parent=self.root
+                            ))
                             return
                     else:
                         self.update_status(f"连接 {address} 失败")
-                        messagebox.showerror("失败",
+                        # 直接在主线程关闭弹窗
+                        self.root.after(0, self.connect_dialog.destroy)
+                        # 延迟显示错误提示
+                        self.root.after(100, lambda: messagebox.showerror("失败",
                             f"连接失败！\n命令: {adb_cmd}\n输出: {process.stdout}\n错误: {process.stderr}",
-                            parent=dialog)
-                        dialog.destroy()
+                            parent=self.root))
                         return
-                        
+
                 except Exception as e:
                     error_msg = f"连接执行异常: {str(e)}"
                     self.append_output(error_msg, "ERROR")
                     self.update_status(f"连接失败: {str(e)}")
-                    messagebox.showerror("错误", error_msg, parent=dialog)
-                    dialog.destroy()
+                    # 直接在主线程关闭弹窗
+                    self.root.after(0, self.connect_dialog.destroy)
+                    # 延迟显示错误提示
+                    self.root.after(100, lambda: messagebox.showerror("错误", error_msg, parent=self.root))
                     return
 
             thread = threading.Thread(target=run_connect)
@@ -903,10 +1638,18 @@ class ADBGUI:
             thread.start()
 
         ttk.Button(btn_frame, text="立即连接", style="Action.TButton", command=do_connect).grid(row=0, column=0, padx=5, pady=5, sticky=(tk.W, tk.E))
-        ttk.Button(btn_frame, text="取消", style="Action.TButton", command=dialog.destroy).grid(row=0, column=1, padx=5, pady=5, sticky=(tk.W, tk.E))
+        ttk.Button(btn_frame, text="取消", style="Action.TButton", command=self.connect_dialog.destroy).grid(row=0, column=1, padx=5, pady=5, sticky=(tk.W, tk.E))
 
         # 回车触发连接
-        dialog.bind('<Return>', lambda e: do_connect())
+        self.connect_dialog.bind('<Return>', lambda e: do_connect())
+
+        # 绑定窗口关闭事件，清理引用
+        def on_dialog_close():
+            try:
+                self.connect_dialog.destroy()
+            except:
+                pass
+        self.connect_dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
 
     def toggle_screen(self, action=None):
         """切换屏幕状态（息屏/亮屏）"""
@@ -1045,6 +1788,9 @@ class ADBGUI:
         info_window.minsize(600, 500)
         info_window.transient(self.root)
 
+        # 更新窗口以确保尺寸信息正确
+        info_window.update_idletasks()
+
         # 居中显示
         x = self.root.winfo_x() + (self.root.winfo_width() - info_window.winfo_width()) // 2
         y = self.root.winfo_y() + (self.root.winfo_height() - info_window.winfo_height()) // 2
@@ -1150,6 +1896,14 @@ class ADBGUI:
         file_window.geometry("800x600")
         file_window.transient(self.root)
 
+        # 更新窗口以确保尺寸信息正确
+        file_window.update_idletasks()
+
+        # 居中显示
+        x = self.root.winfo_x() + (self.root.winfo_width() - file_window.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - file_window.winfo_height()) // 2
+        file_window.geometry(f"+{x}+{y}")
+
         main_frame = ttk.Frame(file_window, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -1245,14 +1999,199 @@ class ADBGUI:
         if not selection:
             messagebox.showwarning("警告", "请选择文件")
             return
-        
+
         item = file_list.item(selection[0])
         name = item['values'][0]
         path = os.path.join(self.current_path_var.get(), name).replace('\\', '/')
-        
+
         save_path = filedialog.asksaveasfilename(initialfile=name)
         if save_path:
             self.execute_adb_command(f'pull "{path}" "{save_path}"', device)
+
+    def pull_device_logs(self, device):
+        """获取设备当天日志"""
+        # 选择保存目录
+        save_dir = filedialog.askdirectory(title="选择日志保存目录")
+        if not save_dir:
+            return
+
+        # 执行拉取日志命令
+        log_path = "/sdcard/Android/data/cn.aisports.app/files/logs"
+        self.append_output(f"开始从设备 {device} 拉取日志: {log_path}", "INFO")
+        self.append_output(f"保存到: {save_dir}", "INFO")
+
+        # 正确的命令格式: adb -s device_id pull source destination
+        cmd = f'adb -s {device} pull "{log_path}" .'
+        # 在子进程中切换到目标目录再执行
+        import os
+        if os.name == 'nt':  # Windows
+            cmd = f'cd /d "{save_dir}" && adb -s {device} pull "{log_path}" .'
+        else:  # Linux/Mac
+            cmd = f'cd "{save_dir}" && adb -s {device} pull "{log_path}" .'
+
+        self.update_status(f"执行命令: {cmd}")
+        self.command_queue.put((cmd, None, 2))
+
+    def modify_device_ip(self, device):
+        """修改设备的固定IP地址"""
+        device_detail = self.device_details.get(device, {})
+        dev_type = device_detail.get("type", "wired")
+        current_ip = device_detail.get("ip", "未知") if dev_type == "wireless" else "未知（有线设备）"
+
+        # 创建IP修改对话框
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"修改设备IP - {device}")
+        dialog.geometry("450x320")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        # 更新窗口以确保尺寸信息正确
+        dialog.update_idletasks()
+
+        # 居中显示
+        x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 当前IP信息
+        ttk.Label(main_frame, text="当前IP地址:", font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        current_ip_label = ttk.Label(main_frame, text=current_ip, font=("Microsoft YaHei", 11, "bold"), foreground="#007bff")
+        current_ip_label.grid(row=0, column=1, sticky=tk.W, pady=(0, 5))
+
+        # 设备类型提示
+        dev_type_text = "📶 无线设备" if dev_type == "wireless" else "🔌 有线设备"
+        ttk.Label(main_frame, text=f"设备类型: {dev_type_text}", font=("Microsoft YaHei", 9), foreground="#6c757d").grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(0, 15))
+
+        # 新IP输入
+        ttk.Label(main_frame, text="新IP地址:", font=("Microsoft YaHei", 10)).grid(row=2, column=0, sticky=tk.W, pady=(0, 5))
+        new_ip_var = tk.StringVar()
+        ttk.Entry(main_frame, textvariable=new_ip_var, font=("Microsoft YaHei", 10)).grid(row=2, column=1, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        # 子网掩码
+        ttk.Label(main_frame, text="子网掩码:", font=("Microsoft YaHei", 10)).grid(row=3, column=0, sticky=tk.W, pady=(0, 5))
+        netmask_var = tk.StringVar(value="255.255.255.0")
+        ttk.Entry(main_frame, textvariable=netmask_var, font=("Microsoft YaHei", 10)).grid(row=3, column=1, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        # 网关
+        ttk.Label(main_frame, text="网关:", font=("Microsoft YaHei", 10)).grid(row=4, column=0, sticky=tk.W, pady=(0, 5))
+        gateway_var = tk.StringVar()
+        ttk.Entry(main_frame, textvariable=gateway_var, font=("Microsoft YaHei", 10)).grid(row=4, column=1, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        # 网络接口选择（有线设备需要）
+        if dev_type == "wired":
+            ttk.Label(main_frame, text="网络接口:", font=("Microsoft YaHei", 10)).grid(row=5, column=0, sticky=tk.W, pady=(0, 5))
+            interface_var = tk.StringVar(value="eth0")
+            interface_combobox = ttk.Combobox(main_frame, textvariable=interface_var, values=["eth0", "eth1"], width=15)
+            interface_combobox.grid(row=5, column=1, sticky=tk.W, pady=(0, 5))
+
+        # 操作按钮
+        btn_frame = ttk.Frame(main_frame)
+        row_offset = 6 if dev_type == "wired" else 6
+        btn_frame.grid(row=row_offset, column=0, columnspan=2, pady=(20, 0), sticky=(tk.W, tk.E))
+        btn_frame.columnconfigure((0, 1), weight=1)
+
+        def on_confirm():
+            new_ip = new_ip_var.get().strip()
+            netmask = netmask_var.get().strip()
+            gateway = gateway_var.get().strip()
+
+            if not new_ip:
+                messagebox.showwarning("警告", "请输入新的IP地址", parent=dialog)
+                return
+
+            if not netmask:
+                messagebox.showwarning("警告", "请输入子网掩码", parent=dialog)
+                return
+
+            # 根据设备类型执行不同的操作
+            if dev_type == "wireless":
+                # 无线设备：断开ADB连接后重新连接到新IP
+                new_address = f"{new_ip}:5555"
+                self.append_output(f"断开设备 {device} 的连接...", "INFO")
+                self.execute_adb_command(f"disconnect {device}")
+
+                def reconnect():
+                    self.append_output(f"尝试连接到新IP: {new_address}", "INFO")
+                    self.execute_adb_command(f"connect {new_address}")
+
+                self.root.after(2000, reconnect)
+                self.root.after(3000, self.refresh_devices)
+            else:
+                # 有线设备：在设备内部修改网络配置
+                interface = interface_var.get()
+                self.append_output(f"为设备 {device} 修改网络配置...", "INFO")
+                self.append_output(f"接口: {interface}, IP: {new_ip}, 掩码: {netmask}, 网关: {gateway}", "INFO")
+
+                # 构建修改IP的命令（需要root权限）
+                set_ip_cmd = f"shell su -c 'ifconfig {interface} {new_ip} netmask {netmask}'"
+                if gateway:
+                    set_ip_cmd = f"shell su -c 'ifconfig {interface} {new_ip} netmask {netmask} && route add default gw {gateway}'"
+
+                self.append_output(f"执行命令: adb -s {device} {set_ip_cmd}", "INFO")
+
+                # 执行修改IP命令
+                def run_set_ip():
+                    try:
+                        # 1. 检查是否有root权限
+                        check_root = subprocess.run(
+                            f"adb -s {device} shell su -c 'id'",
+                            shell=True,
+                            capture_output=True,
+                            text=True,
+                            timeout=5
+                        )
+
+                        if "uid=0" not in check_root.stdout:
+                            self.root.after(0, lambda: messagebox.showerror(
+                                "权限错误",
+                                f"设备 {device} 未获取root权限！\n\n修改IP需要root权限，请先对设备进行root操作。",
+                                parent=self.root
+                            ))
+                            self.root.after(100, dialog.destroy)
+                            return
+
+                        # 2. 执行修改IP命令
+                        result = subprocess.run(
+                            f"adb -s {device} {set_ip_cmd}",
+                            shell=True,
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+
+                        if result.returncode == 0:
+                            self.root.after(0, lambda: messagebox.showinfo(
+                                "修改成功",
+                                f"已成功为设备 {device} 设置IP地址\n\n新IP: {new_ip}\n子网掩码: {netmask}\n网关: {gateway if gateway else '未设置'}\n\n注意：此修改是临时的，设备重启后会恢复",
+                                parent=self.root
+                            ))
+                            self.append_output(f"设备 {device} IP修改成功", "SUCCESS")
+                        else:
+                            error_msg = result.stderr if result.stderr else result.stdout
+                            self.root.after(0, lambda: messagebox.showerror(
+                                "修改失败",
+                                f"修改IP失败！\n\n错误信息: {error_msg}",
+                                parent=self.root
+                            ))
+                            self.append_output(f"设备 {device} IP修改失败: {error_msg}", "ERROR")
+
+                    except Exception as e:
+                        self.root.after(0, lambda: messagebox.showerror(
+                            "执行错误",
+                            f"执行修改IP命令时出错: {str(e)}",
+                            parent=self.root
+                        ))
+                        self.append_output(f"设备 {device} IP修改异常: {str(e)}", "ERROR")
+
+                threading.Thread(target=run_set_ip, daemon=True).start()
+
+            dialog.destroy()
+
+        ttk.Button(btn_frame, text="确认修改", command=on_confirm).grid(row=0, column=0, padx=5, pady=5, sticky=(tk.W, tk.E))
+        ttk.Button(btn_frame, text="取消", command=dialog.destroy).grid(row=0, column=1, padx=5, pady=5, sticky=(tk.W, tk.E))
 
     def ensure_adb_server_running(self):
         """确保ADB服务运行"""
@@ -1298,6 +2237,14 @@ class ADBGUI:
         dialog.geometry("350x300")
         dialog.transient(self.root)
         dialog.grab_set()
+
+        # 更新窗口以确保尺寸信息正确
+        dialog.update_idletasks()
+
+        # 居中显示
+        x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
 
         main_frame = ttk.Frame(dialog, padding="15")
         main_frame.pack(fill=tk.BOTH, expand=True)

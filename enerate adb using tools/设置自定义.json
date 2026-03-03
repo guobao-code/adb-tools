@@ -1,0 +1,209 @@
+curl --request POST \
+  --url 'http://192.168.77.2:8080/api/v1/ops/training/sport/custom/set?=' \
+  --header 'Content-Type: application/json' \
+  --header 'REQUEST-WITHOUT-AUTHORIZE: true' \
+  --cookie JSESSIONID=73A83929AD7D9D49F37843960E088AB2 \
+  --data '{
+	"global_config": "自定义运动配置",
+	"sub_config": [{
+			"id": "E-1-10",
+			"value": "多人跳绳",
+			"cd": 60,
+			"enable": false,
+			"dynamicid": null,
+			"uid_null": true,
+			"mock": "skiprope_end_of_action",
+			"parentId": "basic",
+			"desc": "校园版",
+			"sport_area": 6,
+			"sport_area_def": [{
+					"area_id": 1,
+					"area_code": "1-1-1"
+				},
+				{
+					"area_id": 2,
+					"area_code": "1-1-2"
+				},
+				{
+					"area_id": 3,
+					"area_code": "1-1-3"
+				},
+				{
+					"area_id": 4,
+					"area_code": "1-2-1"
+				},
+				{
+					"area_id": 5,
+					"area_code": "1-2-2"
+				},
+				{
+					"area_id": 6,
+					"area_code": "1-2-3"
+				}
+			],
+			"checkin_timeout": 60,
+			"timeout": null,
+			"transpose": 0,
+			"alg_alertor_type": "ropeskipping_multi",
+			"alg_alertor_type2": null,
+			"custom": {
+				"delay_go": 3,
+				"delay_power": "on"
+			},
+			"category_code": "CDTIMES",
+			"policys": [{
+					"dfault": null,
+					"code": "E-1-10-1",
+					"desc": "偏娱乐，都算",
+					"level": [
+						1
+					],
+					"config": null,
+					"bg_pic": null,
+					"maxflow": 1
+				},
+				{
+					"dfault": null,
+					"code": "E-1-10-2",
+					"desc": "严格版：单脚及不拿绳违规",
+					"level": [
+						1
+					],
+					"config": null,
+					"bg_pic": null,
+					"maxflow": 1
+				},
+				{
+					"dfault": null,
+					"code": "E-1-10-15",
+					"desc": "1.5代产品策略",
+					"level": [
+						1
+					],
+					"config": null,
+					"bg_pic": "false",
+					"maxflow": null
+				}
+			],
+			"illegal": [{
+					"code": "E-1-10-1-1",
+					"internal": "rope_sgl",
+					"desc": "单脚跳绳",
+					"level": 1,
+					"real": 1,
+					"enabled": true
+				},
+				{
+					"code": "E-1-10-1-2",
+					"internal": "out_of_area",
+					"desc": "离开运动区",
+					"level": 1,
+					"real": -1,
+					"enabled": null
+				},
+				{
+					"code": "E-1-10-1-3",
+					"internal": "not_holding_rope",
+					"desc": "未双手持绳",
+					"level": 1,
+					"real": 1,
+					"enabled": false
+				},
+				{
+					"code": "E-1-10-1-4",
+					"internal": "trip_rope",
+					"desc": "绊绳中断",
+					"level": 1,
+					"real": 3,
+					"enabled": null
+				}
+			],
+			"lap": {
+				"size": 0,
+				"loop": null,
+				"class_n": 0.0,
+				"freezestart": 0,
+				"freezeloop": 0,
+				"freezestop": 0,
+				"facesearch_limit": 65,
+				"orchestrations_shuttle_done_index_1_patchtime": 0,
+				"orchestrations_shuttle_done_index_2_patchtime": 0
+			},
+			"sub_sports": null,
+			"line_def": null,
+			"left_line_def": null,
+			"right_line_def": null,
+			"switch_sport": null,
+			"score_type": "COUNT",
+			"score_unit": "SINGLE",
+			"digit": null
+		},
+		{
+			"id": "E-1-1",
+			"sport_area": 2,
+			"sport_area_def": [{
+					"area_code": "1-1-1",
+					"area_id": 1
+				},
+				{
+					"area_code": "1-2-1",
+					"area_id": 2
+				}
+			]
+		},
+		{
+			"id": "E-1-2",
+			"sport_area": 2,
+			"sport_area_def": [{
+					"area_code": "1-1-1",
+					"area_id": 1
+				},
+				{
+					"area_code": "1-2-1",
+					"area_id": 2
+				}
+			]
+		},
+		{
+			"id": "E-1-3",
+			"sport_area": 1,
+			"sport_area_def": [{
+				"area_code": "1-1-1",
+				"area_id": 1
+			}]
+		},
+		{
+			"lap": {
+				"freezeloop": 20000,
+				"freezestop": 20000,
+				"size": 200,
+				"loop": [
+					200,
+					400,
+					600,
+					800
+				],
+				"facesearch_limit": 65,
+				"freezestart": 20000
+			},
+			"id": "E-2-3"
+		},
+		{
+			"lap": {
+				"freezeloop": 20000,
+				"freezestop": 20000,
+				"size": 200,
+				"loop": [
+					200,
+					400,
+					600,
+					800,
+					1000
+				],
+				"facesearch_limit": 65,
+				"freezestart": 20000
+			},
+			"id": "E-2-4"
+		}
+	]
+}'
