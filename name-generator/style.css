@@ -125,6 +125,22 @@ select:focus, input:focus {
     font-weight: 600;
 }
 
+.name-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    justify-content: center;
+}
+
+.grade-tag {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+    font-weight: 600;
+}
+
 .gender-tag {
     font-size: 12px;
     padding: 4px 12px;

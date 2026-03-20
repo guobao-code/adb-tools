@@ -9,6 +9,7 @@ import socket
 import time
 import sys
 import re
+from insomnia_gui import InsomniaGUI
 
 
 class ADBGUI:
@@ -44,6 +45,9 @@ class ADBGUI:
         self.filter_level = tk.StringVar(value="ALL") # 日志级别过滤
         self.raw_logs = []  # 新增：维护原始日志列表，用于过滤恢复
 
+        # 初始化 Insomnia 工具模块
+        self.insomnia_gui = InsomniaGUI(root)
+
         # 创建主框架（改用PanedWindow实现可拖拽调整区域大小）
         main_paned = ttk.PanedWindow(root, orient=tk.VERTICAL)
         main_paned.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -68,8 +72,8 @@ class ADBGUI:
                    command=self.refresh_devices).grid(row=0, column=0, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="连接设备(IP)",
                    command=self.connect_device).grid(row=0, column=1, padx=2, pady=2, sticky=(tk.W, tk.E))
-        ttk.Button(device_buttons_frame, text="工具",
-                   command=self.show_tools_window).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
+        ttk.Button(device_buttons_frame, text="insomnia工具",
+                   command=self.show_insomnia_tools).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="息屏",
                    command=lambda: self.toggle_screen("off")).grid(row=0, column=3, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="亮屏",
@@ -425,8 +429,7 @@ class ADBGUI:
         # 无设备时的提示
         if not devices and not unauthorized_devices:
             self.device_status_label.config(text="未检测到任何设备", foreground="#6c757d")
-            empty_label = ttk.Label(self.device_scrollable_frame, text="📱 暂无设备连接\n\n请确保：\n1. 设备已开启USB调试\n2. 数据线已正确连接\n3. ADB服务正常运行",
-                                    font=("Microsoft YaHei", 12), foreground="#6c757d", justify=tk.CENTER)
+            empty_label = ttk.Label(self.device_scrollable_frame, text="📱 暂无设备连接 ",font=("Microsoft YaHei", 12), foreground="#6c757d", justify=tk.CENTER)
             empty_label.pack(expand=True, pady=50)
 
         # 更新滚动区域
@@ -735,673 +738,10 @@ class ADBGUI:
             self.cmd_device_combobox.current(0)
             self.cmd_device_combobox.config(state="disabled")
 
-    def show_tools_window(self):
-        """显示工具窗口"""
-        # 如果已存在未关闭的dialog，先关闭
-        if hasattr(self, 'tools_dialog') and self.tools_dialog and self.tools_dialog.winfo_exists():
-            try:
-                self.tools_dialog.destroy()
-            except:
-                pass
+    # show_tools_window 及相关方法已移动到 insomnia_gui.py
+    # 如果需要使用原功能，请调用 self.insomnia_gui.show_tools_window()
 
-        # 创建工具窗口
-        self.tools_dialog = tk.Toplevel(self.root)
-        self.tools_dialog.title("工具")
-        self.tools_dialog.geometry("1000x600")
-        self.tools_dialog.resizable(True, True)
-        self.tools_dialog.transient(self.root)
-
-        # 等待窗口创建完成后再计算居中位置
-        self.tools_dialog.update_idletasks()
-
-        # 居中显示
-        x = self.root.winfo_x() + (self.root.winfo_width() - self.tools_dialog.winfo_width()) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - self.tools_dialog.winfo_height()) // 2
-        self.tools_dialog.geometry(f"+{x}+{y}")
-
-        # 主框架
-        main_frame = ttk.Frame(self.tools_dialog, padding="20")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # 按钮框架
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=tk.X, pady=(0, 10))
-
-        # 所有按钮在一行显示
-        for i in range(5):
-            btn_frame.columnconfigure(i, weight=1)
-
-        # 版本按钮
-        ttk.Button(btn_frame, text="版本",
-                   command=lambda: self.get_version_info()).grid(row=0, column=0, padx=2, pady=2, sticky=(tk.W, tk.E))
-
-        # 获取配置按钮
-        ttk.Button(btn_frame, text="获取配置",
-                   command=lambda: self.get_config_info()).grid(row=0, column=1, padx=2, pady=2, sticky=(tk.W, tk.E))
-
-        # 设置配置按钮
-        ttk.Button(btn_frame, text="设置配置",
-                   command=lambda: self.set_config_info()).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
-
-        # 获取自定义按钮
-        ttk.Button(btn_frame, text="获取自定义",
-                   command=lambda: self.get_custom_info()).grid(row=0, column=3, padx=2, pady=2, sticky=(tk.W, tk.E))
-
-        # 设置自定义按钮
-        ttk.Button(btn_frame, text="设置自定义",
-                   command=lambda: self.set_custom_info()).grid(row=0, column=4, padx=2, pady=2, sticky=(tk.W, tk.E))
-
-        # OTA升级按钮
-        ttk.Button(btn_frame, text="OTA升级",
-                   command=lambda: self.ota_upgrade()).grid(row=0, column=5, padx=2, pady=2, sticky=(tk.W, tk.E))
-
-        # 信息显示区域
-        info_frame = ttk.LabelFrame(main_frame, text="信息显示", padding="10")
-        info_frame.pack(fill=tk.BOTH, expand=True)
-
-        # 创建文本框显示信息
-        self.tools_text = tk.Text(info_frame, height=20, width=50, wrap=tk.WORD)
-        self.tools_text.pack(fill=tk.BOTH, expand=True)
-        self.tools_text.insert(tk.END, "点击上方按钮获取信息...")
-        self.tools_text.config(state=tk.DISABLED)
-
-        # 关闭按钮
-        ttk.Button(main_frame, text="关闭",
-                   command=self.tools_dialog.destroy).pack(fill=tk.X, pady=(10, 0))
-
-    def get_version_info(self):
-        """获取版本信息"""
-        self.tools_text.config(state=tk.NORMAL)
-        self.tools_text.delete(1.0, tk.END)
-        self.tools_text.insert(tk.END, "正在获取版本信息...\n")
-        self.tools_text.update()
-
-        try:
-            import requests
-
-            url = "http://192.168.77.2:8080/api/v1/ops/version"
-            headers = {
-                'REQUEST-WITHOUT-AUTHORIZE': 'true'
-            }
-            cookies = {
-                'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
-            }
-
-            response = requests.get(url, headers=headers, cookies=cookies, timeout=10)
-
-            if response.status_code == 200:
-                data = response.json()
-
-                if data.get('code') == 0:
-                    version_data = data.get('data', {})
-
-                    # Display as JSON format with proper formatting
-                    import json
-                    result = json.dumps(version_data, indent=4, ensure_ascii=False)
-
-                    self.tools_text.delete(1.0, tk.END)
-                    self.tools_text.insert(tk.END, result)
-                else:
-                    self.tools_text.delete(1.0, tk.END)
-                    self.tools_text.insert(tk.END, f"获取失败: {data.get('message', '未知错误')}")
-            else:
-                self.tools_text.delete(1.0, tk.END)
-                self.tools_text.insert(tk.END, f"请求失败: HTTP {response.status_code}")
-
-        except requests.exceptions.Timeout:
-            self.tools_text.delete(1.0, tk.END)
-            self.tools_text.insert(tk.END, "请求超时，请检查网络连接")
-        except requests.exceptions.ConnectionError:
-            self.tools_text.delete(1.0, tk.END)
-            self.tools_text.insert(tk.END, "连接失败，请检查服务器地址和端口")
-        except Exception as e:
-            self.tools_text.delete(1.0, tk.END)
-            self.tools_text.insert(tk.END, f"发生错误: {str(e)}")
-
-        self.tools_text.config(state=tk.DISABLED)
-
-    def get_config_info(self):
-        """获取配置信息"""
-        self.tools_text.config(state=tk.NORMAL)
-        self.tools_text.delete(1.0, tk.END)
-        self.tools_text.insert(tk.END, "正在获取配置信息...\n")
-        self.tools_text.update()
-
-        try:
-            import requests
-
-            url = "http://192.168.77.2:8080/api/v1/ops/internal/training/sport/configs/8oHftycwh79693Jpq4TB"
-            headers = {
-                'REQUEST-WITHOUT-AUTHORIZE': 'true'
-            }
-            cookies = {
-                'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
-            }
-
-            response = requests.get(url, headers=headers, cookies=cookies, timeout=10)
-
-            if response.status_code == 200:
-                data = response.json()
-
-                if data.get('code') == 0:
-                    config_data = data.get('data', {})
-
-                    # Display as JSON format with proper formatting
-                    import json
-                    result = json.dumps(config_data, indent=4, ensure_ascii=False)
-
-                    self.tools_text.delete(1.0, tk.END)
-                    self.tools_text.insert(tk.END, result)
-                else:
-                    self.tools_text.delete(1.0, tk.END)
-                    self.tools_text.insert(tk.END, f"获取失败: {data.get('message', '未知错误')}")
-            else:
-                self.tools_text.delete(1.0, tk.END)
-                self.tools_text.insert(tk.END, f"请求失败: HTTP {response.status_code}")
-
-        except requests.exceptions.Timeout:
-            self.tools_text.delete(1.0, tk.END)
-            self.tools_text.insert(tk.END, "请求超时，请检查网络连接")
-        except requests.exceptions.ConnectionError:
-            self.tools_text.delete(1.0, tk.END)
-            self.tools_text.insert(tk.END, "连接失败，请检查服务器地址和端口")
-        except Exception as e:
-            self.tools_text.delete(1.0, tk.END)
-            self.tools_text.insert(tk.END, f"发生错误: {str(e)}")
-
-        self.tools_text.config(state=tk.DISABLED)
-
-    def set_config_info(self):
-        """设置配置信息"""
-        # 读取默认配置文件
-        import json
-        import os
-
-        config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "设置json.json")
-
-        default_content = ""
-        if os.path.exists(config_file):
-            try:
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    default_content = f.read()
-            except Exception as e:
-                default_content = f"读取配置文件失败: {str(e)}"
-
-        # 创建设置配置窗口
-        set_config_dialog = tk.Toplevel(self.tools_dialog)
-        set_config_dialog.title("设置配置")
-        set_config_dialog.geometry("900x600")
-        set_config_dialog.resizable(True, True)
-        set_config_dialog.transient(self.tools_dialog)
-
-        # 居中显示
-        set_config_dialog.update_idletasks()
-        x = self.tools_dialog.winfo_x() + (self.tools_dialog.winfo_width() - set_config_dialog.winfo_width()) // 2
-        y = self.tools_dialog.winfo_y() + (self.tools_dialog.winfo_height() - set_config_dialog.winfo_height()) // 2
-        set_config_dialog.geometry(f"+{x}+{y}")
-
-        # 主框架
-        main_frame = ttk.Frame(set_config_dialog, padding="20")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # 输入框框架
-        input_frame = ttk.LabelFrame(main_frame, text="配置内容(JSON格式)", padding="10")
-        input_frame.pack(fill=tk.BOTH, expand=True)
-
-        # 创建文本编辑框
-        config_text = tk.Text(input_frame, height=25, wrap=tk.WORD)
-        config_text.pack(fill=tk.BOTH, expand=True)
-        if default_content:
-            config_text.insert(tk.END, default_content)
-
-        # 滚动条
-        scrollbar = ttk.Scrollbar(input_frame, orient="vertical", command=config_text.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        config_text.configure(yscrollcommand=scrollbar.set)
-
-        # 按钮框架
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=tk.X, pady=(10, 0))
-        btn_frame.columnconfigure(0, weight=1)
-        btn_frame.columnconfigure(1, weight=1)
-
-        def do_set_config():
-            """执行设置配置"""
-            config_content = config_text.get(1.0, tk.END).strip()
-
-            if not config_content:
-                messagebox.showerror("错误", "请输入配置内容", parent=set_config_dialog)
-                return
-
-            # 验证JSON格式
-            try:
-                json_data = json.loads(config_content)
-            except json.JSONDecodeError as e:
-                messagebox.showerror("错误", f"JSON格式错误: {str(e)}", parent=set_config_dialog)
-                return
-
-            # 发送POST请求
-            try:
-                import requests
-
-                url = "http://192.168.77.2:8080/api/v1/ops/internal/training/sport/configs/8oHftycwh79693Jpq4TB"
-                headers = {
-                    'REQUEST-WITHOUT-AUTHORIZE': 'true',
-                    'Content-Type': 'application/json'
-                }
-                cookies = {
-                    'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
-                }
-
-                # 显示进度
-                config_text.delete(1.0, tk.END)
-                config_text.insert(tk.END, "正在设置配置...\n")
-                config_text.update()
-
-                response = requests.post(url, json=json_data, headers=headers, cookies=cookies, timeout=30)
-
-                # 显示结果
-                result_json = response.json()
-                result_text = json.dumps(result_json, indent=4, ensure_ascii=False)
-
-                config_text.delete(1.0, tk.END)
-                config_text.insert(tk.END, result_text)
-
-                # 显示成功提示
-                if result_json.get('code') == 0:
-                    messagebox.showinfo("成功", "配置设置成功！", parent=set_config_dialog)
-                else:
-                    messagebox.showwarning("警告", f"设置失败: {result_json.get('message', '未知错误')}", parent=set_config_dialog)
-
-            except requests.exceptions.Timeout:
-                messagebox.showerror("错误", "请求超时，请检查网络连接", parent=set_config_dialog)
-                config_text.delete(1.0, tk.END)
-                config_text.insert(tk.END, "请求超时")
-            except requests.exceptions.ConnectionError:
-                messagebox.showerror("错误", "连接失败，请检查服务器地址和端口", parent=set_config_dialog)
-                config_text.delete(1.0, tk.END)
-                config_text.insert(tk.END, "连接失败")
-            except Exception as e:
-                messagebox.showerror("错误", f"发生错误: {str(e)}", parent=set_config_dialog)
-                config_text.delete(1.0, tk.END)
-                config_text.insert(tk.END, f"错误: {str(e)}")
-
-        # 设置按钮
-        ttk.Button(btn_frame, text="设置",
-                   command=do_set_config).grid(row=0, column=0, padx=(0, 5), sticky=(tk.W, tk.E))
-
-        # 关闭按钮
-        ttk.Button(btn_frame, text="关闭",
-                   command=set_config_dialog.destroy).grid(row=0, column=1, padx=(5, 0), sticky=(tk.W, tk.E))
-
-    def get_custom_info(self):
-        """获取自定义配置信息"""
-        self.tools_text.config(state=tk.NORMAL)
-        self.tools_text.delete(1.0, tk.END)
-        self.tools_text.insert(tk.END, "正在获取自定义配置信息...\n")
-        self.tools_text.update()
-
-        try:
-            import requests
-
-            url = "http://192.168.77.2:8080/api/v1/ops/training/sport/custom/get"
-            headers = {
-                'REQUEST-WITHOUT-AUTHORIZE': 'true'
-            }
-            cookies = {
-                'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
-            }
-
-            response = requests.get(url, headers=headers, cookies=cookies, timeout=10)
-
-            if response.status_code == 200:
-                data = response.json()
-
-                # Display as JSON format with proper formatting
-                import json
-                result = json.dumps(data, indent=4, ensure_ascii=False)
-
-                self.tools_text.delete(1.0, tk.END)
-                self.tools_text.insert(tk.END, result)
-            else:
-                self.tools_text.delete(1.0, tk.END)
-                self.tools_text.insert(tk.END, f"请求失败: HTTP {response.status_code}")
-
-        except requests.exceptions.Timeout:
-            self.tools_text.delete(1.0, tk.END)
-            self.tools_text.insert(tk.END, "请求超时，请检查网络连接")
-        except requests.exceptions.ConnectionError:
-            self.tools_text.delete(1.0, tk.END)
-            self.tools_text.insert(tk.END, "连接失败，请检查服务器地址和端口")
-        except Exception as e:
-            self.tools_text.delete(1.0, tk.END)
-            self.tools_text.insert(tk.END, f"发生错误: {str(e)}")
-
-        self.tools_text.config(state=tk.DISABLED)
-
-    def set_custom_info(self):
-        """设置自定义配置信息"""
-        # 读取默认配置文件
-        import json
-        import os
-
-        config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "设置自定义.json")
-
-        default_content = ""
-        if os.path.exists(config_file):
-            try:
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    # 读取JSON data部分（去除curl命令部分）
-                    content = f.read()
-                    # 查找第一个{的位置
-                    start_idx = content.find('{')
-                    if start_idx != -1:
-                        # 提取JSON部分
-                        json_content = content[start_idx:].strip()
-                        # 去除末尾的单引号（如果有）
-                        if json_content.endswith("'"):
-                            json_content = json_content[:-1]
-                        default_content = json_content
-                    else:
-                        default_content = f"读取配置文件失败: 未找到JSON数据"
-            except Exception as e:
-                default_content = f"读取配置文件失败: {str(e)}"
-
-        # 创建设置自定义配置窗口
-        set_custom_dialog = tk.Toplevel(self.tools_dialog)
-        set_custom_dialog.title("设置自定义配置")
-        set_custom_dialog.geometry("900x600")
-        set_custom_dialog.resizable(True, True)
-        set_custom_dialog.transient(self.tools_dialog)
-
-        # 居中显示
-        set_custom_dialog.update_idletasks()
-        x = self.tools_dialog.winfo_x() + (self.tools_dialog.winfo_width() - set_custom_dialog.winfo_width()) // 2
-        y = self.tools_dialog.winfo_y() + (self.tools_dialog.winfo_height() - set_custom_dialog.winfo_height()) // 2
-        set_custom_dialog.geometry(f"+{x}+{y}")
-
-        # 主框架
-        main_frame = ttk.Frame(set_custom_dialog, padding="20")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # 输入框框架
-        input_frame = ttk.LabelFrame(main_frame, text="自定义配置内容(JSON格式)", padding="10")
-        input_frame.pack(fill=tk.BOTH, expand=True)
-
-        # 创建文本编辑框
-        custom_text = tk.Text(input_frame, height=25, wrap=tk.WORD)
-        custom_text.pack(fill=tk.BOTH, expand=True)
-        if default_content:
-            custom_text.insert(tk.END, default_content)
-
-        # 滚动条
-        scrollbar = ttk.Scrollbar(input_frame, orient="vertical", command=custom_text.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        custom_text.configure(yscrollcommand=scrollbar.set)
-
-        # 按钮框架
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=tk.X, pady=(10, 0))
-        btn_frame.columnconfigure(0, weight=1)
-        btn_frame.columnconfigure(1, weight=1)
-
-        def do_set_custom():
-            """执行设置自定义配置"""
-            config_content = custom_text.get(1.0, tk.END).strip()
-
-            if not config_content:
-                messagebox.showerror("错误", "请输入自定义配置内容", parent=set_custom_dialog)
-                return
-
-            # 验证JSON格式
-            try:
-                json_data = json.loads(config_content)
-            except json.JSONDecodeError as e:
-                messagebox.showerror("错误", f"JSON格式错误: {str(e)}", parent=set_custom_dialog)
-                return
-
-            # 发送POST请求
-            try:
-                import requests
-
-                url = "http://192.168.77.2:8080/api/v1/ops/training/sport/custom/set?="
-                headers = {
-                    'REQUEST-WITHOUT-AUTHORIZE': 'true',
-                    'Content-Type': 'application/json'
-                }
-                cookies = {
-                    'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
-                }
-
-                # 显示进度
-                custom_text.delete(1.0, tk.END)
-                custom_text.insert(tk.END, "正在设置自定义配置...\n")
-                custom_text.update()
-
-                response = requests.post(url, json=json_data, headers=headers, cookies=cookies, timeout=30)
-
-                # 显示结果
-                result_json = response.json()
-                result_text = json.dumps(result_json, indent=4, ensure_ascii=False)
-
-                custom_text.delete(1.0, tk.END)
-                custom_text.insert(tk.END, result_text)
-
-                # 显示成功提示
-                if result_json.get('code') == 0:
-                    messagebox.showinfo("成功", "自定义配置设置成功！", parent=set_custom_dialog)
-                else:
-                    messagebox.showwarning("警告", f"设置失败: {result_json.get('message', '未知错误')}", parent=set_custom_dialog)
-
-            except requests.exceptions.Timeout:
-                messagebox.showerror("错误", "请求超时，请检查网络连接", parent=set_custom_dialog)
-                custom_text.delete(1.0, tk.END)
-                custom_text.insert(tk.END, "请求超时")
-            except requests.exceptions.ConnectionError:
-                messagebox.showerror("错误", "连接失败，请检查服务器地址和端口", parent=set_custom_dialog)
-                custom_text.delete(1.0, tk.END)
-                custom_text.insert(tk.END, "连接失败")
-            except Exception as e:
-                messagebox.showerror("错误", f"发生错误: {str(e)}", parent=set_custom_dialog)
-                custom_text.delete(1.0, tk.END)
-                custom_text.insert(tk.END, f"错误: {str(e)}")
-
-        # 设置按钮
-        ttk.Button(btn_frame, text="设置",
-                   command=do_set_custom).grid(row=0, column=0, padx=(0, 5), sticky=(tk.W, tk.E))
-
-        # 关闭按钮
-        ttk.Button(btn_frame, text="关闭",
-                   command=set_custom_dialog.destroy).grid(row=0, column=1, padx=(5, 0), sticky=(tk.W, tk.E))
-
-    def ota_upgrade(self):
-        """OTA升级功能"""
-        # 创建OTA升级窗口
-        ota_dialog = tk.Toplevel(self.tools_dialog)
-        ota_dialog.title("OTA升级")
-        ota_dialog.geometry("600x400")
-        ota_dialog.resizable(False, False)
-        ota_dialog.transient(self.tools_dialog)
-
-        # 居中显示
-        ota_dialog.update_idletasks()
-        x = self.tools_dialog.winfo_x() + (self.tools_dialog.winfo_width() - ota_dialog.winfo_width()) // 2
-        y = self.tools_dialog.winfo_y() + (self.tools_dialog.winfo_height() - ota_dialog.winfo_height()) // 2
-        ota_dialog.geometry(f"+{x}+{y}")
-
-        # 主框架
-        main_frame = ttk.Frame(ota_dialog, padding="20")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # IV输入框
-        ttk.Label(main_frame, text="IV:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        iv_var = tk.StringVar()
-        iv_entry = ttk.Entry(main_frame, textvariable=iv_var, width=50)
-        iv_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5, padx=(10, 0))
-
-        # Key输入框
-        ttk.Label(main_frame, text="Key:").grid(row=1, column=0, sticky=tk.W, pady=5)
-        key_var = tk.StringVar()
-        key_entry = ttk.Entry(main_frame, textvariable=key_var, width=50)
-        key_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=5, padx=(10, 0))
-
-        # 升级包文件选择框
-        ttk.Label(main_frame, text="升级包文件:").grid(row=2, column=0, sticky=tk.W, pady=5)
-
-        package_frame = ttk.Frame(main_frame)
-        package_frame.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5, padx=(10, 0))
-        package_frame.columnconfigure(0, weight=1)
-
-        package_var = tk.StringVar()
-        package_entry = ttk.Entry(package_frame, textvariable=package_var, width=40)
-        package_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        def browse_file():
-            from tkinter import filedialog
-            filename = filedialog.askopenfilename(
-                title="选择升级包文件",
-                filetypes=[("Upgrade Package", "*"), ("All Files", "*.*")]
-            )
-            if filename:
-                package_var.set(filename)
-
-        ttk.Button(package_frame, text="浏览...",
-                   command=browse_file).pack(side=tk.LEFT, padx=(5, 0))
-
-        main_frame.columnconfigure(1, weight=1)
-
-        # 结果显示区域
-        result_frame = ttk.LabelFrame(main_frame, text="升级结果", padding="10")
-        result_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(15, 0))
-        result_frame.columnconfigure(0, weight=1)
-
-        result_text = tk.Text(result_frame, height=8, wrap=tk.WORD)
-        result_text.pack(fill=tk.BOTH, expand=True)
-        result_text.insert(tk.END, "等待升级...")
-        result_text.config(state=tk.DISABLED)
-
-        # 滚动条
-        result_scrollbar = ttk.Scrollbar(result_frame, orient="vertical", command=result_text.yview)
-        result_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        result_text.configure(yscrollcommand=result_scrollbar.set)
-
-        # 按钮框架
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=(15, 0), sticky=(tk.W, tk.E))
-        btn_frame.columnconfigure(0, weight=1)
-        btn_frame.columnconfigure(1, weight=1)
-
-        def do_upgrade():
-            """执行OTA升级"""
-            iv = iv_var.get().strip()
-            key = key_var.get().strip()
-            package_path = package_var.get().strip()
-
-            if not iv or not key:
-                messagebox.showerror("错误", "请输入IV和Key", parent=ota_dialog)
-                return
-
-            if not package_path:
-                messagebox.showerror("错误", "请选择升级包文件", parent=ota_dialog)
-                return
-
-            # 检查文件是否存在
-            import os
-            if not os.path.exists(package_path):
-                messagebox.showerror("错误", "升级包文件不存在", parent=ota_dialog)
-                return
-
-            # 读取文件内容
-            try:
-                with open(package_path, 'rb') as f:
-                    file_content = f.read()
-            except Exception as e:
-                messagebox.showerror("错误", f"读取文件失败: {str(e)}", parent=ota_dialog)
-                return
-
-            # 显示进度
-            result_text.config(state=tk.NORMAL)
-            result_text.delete(1.0, tk.END)
-            result_text.insert(tk.END, "正在执行OTA升级...\n")
-            result_text.insert(tk.END, f"IV: {iv}\n")
-            result_text.insert(tk.END, f"Key: {key}\n")
-            result_text.insert(tk.END, f"文件: {os.path.basename(package_path)}\n")
-            result_text.insert(tk.END, f"文件大小: {len(file_content)} 字节\n\n")
-            result_text.config(state=tk.DISABLED)
-            result_text.update()
-
-            # 发送升级请求
-            try:
-                import requests
-
-                # 使用正确的URL格式
-                url = "http://192.168.77.2:8080/api/v1/ops/ota/upgrade"
-                headers = {
-                    'REQUEST-WITHOUT-AUTHORIZE': 'true',
-                    'Content-Type': 'multipart/form-data'
-                }
-                cookies = {
-                    'JSESSIONID': '73A83929AD7D9D49F37843960E088AB2'
-                }
-
-                # 准备文件和数据
-                files = {
-                    'upgrade_package': (os.path.basename(package_path), file_content, 'application/octet-stream')
-                }
-                data = {
-                    'iv': iv,
-                    'key': key
-                }
-
-                # 更新显示
-                result_text.config(state=tk.NORMAL)
-                result_text.insert(tk.END, "正在发送升级请求...\n")
-                result_text.config(state=tk.DISABLED)
-                result_text.update()
-
-                # 发送请求
-                response = requests.post(url, files=files, data=data, headers=headers, cookies=cookies, timeout=300)
-
-                # 显示结果
-                result_json = response.json()
-                result_text.config(state=tk.NORMAL)
-                result_text.delete(1.0, tk.END)
-                result_text.insert(tk.END, "OTA升级完成\n\n")
-                result_text.insert(tk.END, json.dumps(result_json, indent=4, ensure_ascii=False))
-                result_text.config(state=tk.DISABLED)
-
-                # 显示成功提示
-                if result_json.get('code') == 0:
-                    messagebox.showinfo("成功", "OTA升级成功！", parent=ota_dialog)
-                else:
-                    messagebox.showwarning("警告", f"OTA升级失败: {result_json.get('message', '未知错误')}", parent=ota_dialog)
-
-            except requests.exceptions.Timeout:
-                result_text.config(state=tk.NORMAL)
-                result_text.delete(1.0, tk.END)
-                result_text.insert(tk.END, "请求超时，请检查网络连接")
-                result_text.config(state=tk.DISABLED)
-                messagebox.showerror("错误", "请求超时，请检查网络连接", parent=ota_dialog)
-            except requests.exceptions.ConnectionError:
-                result_text.config(state=tk.NORMAL)
-                result_text.delete(1.0, tk.END)
-                result_text.insert(tk.END, "连接失败，请检查服务器地址和端口")
-                result_text.config(state=tk.DISABLED)
-                messagebox.showerror("错误", "连接失败，请检查服务器地址和端口", parent=ota_dialog)
-            except Exception as e:
-                result_text.config(state=tk.NORMAL)
-                result_text.delete(1.0, tk.END)
-                result_text.insert(tk.END, f"错误: {str(e)}")
-                result_text.config(state=tk.DISABLED)
-                messagebox.showerror("错误", f"发生错误: {str(e)}", parent=ota_dialog)
-
-        # 升级按钮
-        ttk.Button(btn_frame, text="升级",
-                   command=do_upgrade).grid(row=0, column=0, padx=(0, 5), sticky=(tk.W, tk.E))
-
-        # 关闭按钮
-        ttk.Button(btn_frame, text="关闭",
-                   command=ota_dialog.destroy).grid(row=0, column=1, padx=(5, 0), sticky=(tk.W, tk.E))
+        # 工具窗口相关代码已移动到 insomnia_gui.py
 
     def connect_device(self):
         """IP连接设备（保留原有修复逻辑）"""
@@ -1456,8 +796,8 @@ class ADBGUI:
         preset_frame.columnconfigure((0,1,2,3), weight=1)
 
         preset_ips = [
-            "10.0.0.2", "10.0.0.3", "10.0.0.4", "192.168.77.1",
-            "10.0.0.100", "192.168.1.100", "192.168.2.31", "192.168.123.1"
+            "10.0.0.1", "192.168.2.106", "192.168.77.4","192.168.77.5",
+             "192.168.77.6", "192.168.77.31", "192.168.77.32", "192.168.123.100"
         ]
 
         # 显示预设IP
@@ -2015,14 +1355,174 @@ class ADBGUI:
         if not save_dir:
             return
 
-        # 执行拉取日志命令
-        log_path = "/sdcard/Android/data/cn.aisports.app/files/logs"
+        self.append_output(f"正在扫描设备 {device} 上的应用日志目录...", "INFO")
+
+        # 扫描设备上包含 logs 目录的应用包名
+        log_packages = self.scan_log_packages(device)
+
+        if not log_packages:
+            # 未找到日志目录，询问用户是否要手动输入包名并创建日志目录
+            dialog = tk.Toplevel(self.root)
+            dialog.title("未找到日志目录")
+            dialog.geometry("500x300")
+            dialog.resizable(False, False)
+            dialog.transient(self.root)
+
+            # 居中显示
+            dialog.update_idletasks()
+            x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+            dialog.geometry(f"+{x}+{y}")
+
+            main_frame = ttk.Frame(dialog, padding="15")
+            main_frame.pack(fill=tk.BOTH, expand=True)
+
+            ttk.Label(main_frame, text=f"在设备 {device} 上未找到日志目录", font=("Microsoft YaHei", 11, "bold")).pack(pady=(0, 15))
+            ttk.Label(main_frame, text="请输入应用包名，程序将自动创建日志目录", font=("Microsoft YaHei", 9), foreground="#6c757d").pack(pady=(0, 10))
+
+            input_frame = ttk.Frame(main_frame)
+            input_frame.pack(fill=tk.X, pady=(0, 15))
+
+            ttk.Label(input_frame, text="应用包名:", font=("Microsoft YaHei", 9)).pack(side=tk.LEFT, padx=(0, 10))
+            package_var = tk.StringVar(value="cn.aisports.app")
+            package_entry = ttk.Entry(input_frame, textvariable=package_var, font=("Microsoft YaHei", 10), width=35)
+            package_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            package_entry.focus()
+            package_entry.select_range(0, tk.END)
+
+            # 常见包名提示
+            tips_frame = ttk.LabelFrame(main_frame, text="常见包名示例", padding="8")
+            tips_frame.pack(fill=tk.X, pady=(0, 15))
+            tips = ["cn.aisports.app", "com.zl.sport", "cn.aisports"]
+            for i, tip in enumerate(tips):
+                ttk.Label(tips_frame, text=f"• {tip}", font=("Microsoft YaHei", 8), foreground="#6c757d").grid(row=i//3, column=i%3, sticky=tk.W, padx=10, pady=2)
+
+            result = {'confirmed': False, 'package': ''}
+
+            def on_confirm():
+                pkg = package_var.get().strip()
+                if not pkg:
+                    messagebox.showwarning("警告", "请输入应用包名！", parent=dialog)
+                    return
+                result['confirmed'] = True
+                result['package'] = pkg
+                dialog.destroy()
+
+            def on_cancel():
+                result['confirmed'] = False
+                dialog.destroy()
+
+            btn_frame = ttk.Frame(main_frame)
+            btn_frame.pack(fill=tk.X)
+            ttk.Button(btn_frame, text="创建并拉取", command=on_confirm).pack(side=tk.RIGHT, padx=(5, 0))
+            ttk.Button(btn_frame, text="取消", command=on_cancel).pack(side=tk.LEFT)
+
+            # 等待对话框关闭
+            dialog.wait_window()
+
+            if not result['confirmed']:
+                return
+
+            selected_package = result['package']
+
+            # 创建日志目录
+            self.append_output(f"正在为应用 {selected_package} 创建日志目录...", "INFO")
+            log_dir = f"/sdcard/Android/data/{selected_package}/files/logs"
+            create_cmd = f"adb -s {device} shell mkdir -p \"{log_dir}\""
+            create_result = subprocess.run(create_cmd, shell=True, capture_output=True, text=True, timeout=30)
+
+            if create_result.returncode == 0:
+                self.append_output(f"日志目录创建成功: {log_dir}", "SUCCESS")
+                # 检查 files 目录是否存在，不存在也创建
+                files_dir = f"/sdcard/Android/data/{selected_package}/files"
+                check_cmd = f"adb -s {device} shell test -d \"{files_dir}\" || echo \"NOT_EXISTS\""
+                check_result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                if "NOT_EXISTS" in check_result.stdout:
+                    create_files_cmd = f"adb -s {device} shell mkdir -p \"{files_dir}/logs\""
+                    subprocess.run(create_files_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                    self.append_output(f"files 目录也创建成功", "SUCCESS")
+            else:
+                self.append_output(f"创建日志目录失败: {create_result.stderr}", "ERROR")
+                messagebox.showerror("错误", f"创建日志目录失败！\n\n{create_result.stderr}", parent=self.root)
+                return
+        else:
+            # 如果找到多个包，让用户选择
+            selected_package = None
+            if len(log_packages) == 1:
+                selected_package = log_packages[0]
+                self.append_output(f"自动找到应用: {selected_package}", "SUCCESS")
+            else:
+                # 创建选择对话框
+                dialog = tk.Toplevel(self.root)
+                dialog.title("选择应用包名")
+                dialog.geometry("500x400")
+                dialog.resizable(True, True)
+                dialog.transient(self.root)
+
+                # 居中显示
+                dialog.update_idletasks()
+                x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+                y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+                dialog.geometry(f"+{x}+{y}")
+
+                main_frame = ttk.Frame(dialog, padding="15")
+                main_frame.pack(fill=tk.BOTH, expand=True)
+
+                ttk.Label(main_frame, text=f"在设备 {device} 上找到 {len(log_packages)} 个包含日志的应用:", font=("Microsoft YaHei", 10, "bold")).pack(pady=(0, 10))
+
+                # 创建列表框
+                list_frame = ttk.Frame(main_frame)
+                list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+                scrollbar = ttk.Scrollbar(list_frame)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            package_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, font=("Microsoft YaHei", 9), height=10)
+            package_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.config(command=package_listbox.yview)
+
+            for pkg in log_packages:
+                package_listbox.insert(tk.END, pkg)
+
+            package_listbox.select_set(0)  # 默认选中第一个
+
+            result = {'selected': None}
+
+            def on_ok():
+                selection = package_listbox.curselection()
+                if selection:
+                    result['selected'] = package_listbox.get(selection[0])
+                dialog.destroy()
+
+            def on_cancel():
+                result['selected'] = None
+                dialog.destroy()
+
+            btn_frame = ttk.Frame(main_frame)
+            btn_frame.pack(fill=tk.X)
+            ttk.Button(btn_frame, text="确定", command=on_ok).pack(side=tk.RIGHT, padx=(5, 0))
+            ttk.Button(btn_frame, text="取消", command=on_cancel).pack(side=tk.LEFT)
+
+            # 等待对话框关闭
+            dialog.wait_window()
+            selected_package = result['selected']
+
+        if not selected_package:
+            return
+
+        # 清理包名中的标记（如果有）
+        clean_package = selected_package.replace(' (log目录)', '').replace(' (logs目录)', '')
+
+        # 判断是 logs 还是 log 目录
+        if '(log目录)' in selected_package:
+            log_path = f"/sdcard/Android/data/{clean_package}/files/log"
+        else:
+            log_path = f"/sdcard/Android/data/{clean_package}/files/logs"
+
         self.append_output(f"开始从设备 {device} 拉取日志: {log_path}", "INFO")
         self.append_output(f"保存到: {save_dir}", "INFO")
 
         # 正确的命令格式: adb -s device_id pull source destination
-        cmd = f'adb -s {device} pull "{log_path}" .'
-        # 在子进程中切换到目标目录再执行
         import os
         if os.name == 'nt':  # Windows
             cmd = f'cd /d "{save_dir}" && adb -s {device} pull "{log_path}" .'
@@ -2031,6 +1531,93 @@ class ADBGUI:
 
         self.update_status(f"执行命令: {cmd}")
         self.command_queue.put((cmd, None, 2))
+
+    def scan_log_packages(self, device):
+        """扫描设备上包含 logs 目录的应用包名"""
+        try:
+            self.append_output(f"正在扫描设备 {device} 的应用数据目录...", "INFO")
+
+            packages = []
+
+            # 方法1: 使用 find 命令查找 logs 目录（最可靠）
+            cmd = f"adb -s {device} shell find /sdcard/Android/data -type d -name \"logs\" 2>/dev/null"
+            self.append_output(f"执行扫描命令: {cmd}", "INFO")
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+
+            if result.stdout.strip():
+                self.append_output(f"找到日志路径:\n{result.stdout[:200]}", "INFO")
+                for line in result.stdout.strip().split('\n'):
+                    if '/files/logs' in line:
+                        # 从路径中提取包名，例如 /sdcard/Android/data/com.example.app/files/logs
+                        parts = line.strip().split('/')
+                        if len(parts) >= 5:
+                            package_name = parts[4]
+                            if package_name and package_name not in packages:
+                                packages.append(package_name)
+                                self.append_output(f"找到应用包名: {package_name}", "SUCCESS")
+
+            # 方法2: 如果没找到，尝试常见的体育应用包名
+            if not packages:
+                self.append_output(f"未通过 find 命令找到，尝试常见应用包名...", "WARNING")
+                common_packages = [
+                    'cn.aisports.app',           # 智能体育
+                    'com.zl.sport',              # 中联体育
+                    'com.tencent.tmgp.zhibo',    # 腾讯直播
+                    'com.example.sport',         # 示例
+                    'com.sport.app',             # 体育应用
+                    'com.zl.sport',              # 中联体育
+                    'cn.aisports',               # AISports
+                ]
+
+                for pkg in common_packages:
+                    test_cmd = f"adb -s {device} shell test -d \"/sdcard/Android/data/{pkg}/files/logs\" && echo \"EXISTS\""
+                    test_result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                    if "EXISTS" in test_result.stdout:
+                        packages.append(pkg)
+                        self.append_output(f"确认应用包名存在: {pkg}", "SUCCESS")
+
+            # 方法3: 如果还没找到，列出所有应用的文件目录，让用户手动选择
+            if not packages:
+                self.append_output(f"尝试列出所有包含 files 目录的应用...", "WARNING")
+                cmd = f"adb -s {device} shell ls -d /sdcard/Android/data/*/files 2>/dev/null"
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+
+                if result.stdout.strip():
+                    potential_packages = []
+                    for line in result.stdout.strip().split('\n'):
+                        line = line.strip()
+                        if line and '/files' in line:
+                            parts = line.split('/')
+                            if len(parts) >= 5:
+                                pkg = parts[4]
+                                if pkg and pkg not in potential_packages:
+                                    potential_packages.append(pkg)
+
+                    # 检查这些应用是否有 log 或 logs 目录
+                    for pkg in potential_packages:
+                        # 检查 logs 目录
+                        test_cmd = f"adb -s {device} shell test -d \"/sdcard/Android/data/{pkg}/files/logs\" && echo \"LOGS\""
+                        test_result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                        if "LOGS" in test_result.stdout:
+                            packages.append(pkg)
+                            continue
+
+                        # 检查 log 目录（单数形式）
+                        test_cmd = f"adb -s {device} shell test -d \"/sdcard/Android/data/{pkg}/files/log\" && echo \"LOG\""
+                        test_result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                        if "LOG" in test_result.stdout:
+                            packages.append(pkg + " (log目录)")
+
+            if not packages:
+                self.append_output(f"扫描完成，未找到包含日志目录的应用", "WARNING")
+
+            return packages
+        except subprocess.TimeoutExpired:
+            self.append_output(f"扫描应用包名超时", "ERROR")
+            return []
+        except Exception as e:
+            self.append_output(f"扫描应用包名失败: {str(e)}", "ERROR")
+            return []
 
     def modify_device_ip(self, device):
         """修改设备的固定IP地址"""
@@ -2224,6 +1811,10 @@ class ADBGUI:
         except Exception as e:
             self.append_output(f"重启ADB服务异常: {str(e)}", "ERROR")
             self.update_status(f"ADB服务重启失败: {str(e)}")
+
+    def show_insomnia_tools(self):
+        """显示 Insomnia 工具窗口"""
+        self.insomnia_gui.show_tools_window()
 
     def restart_adb_server(self):
         """用户触发重启ADB"""

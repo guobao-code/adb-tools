@@ -1,4 +1,10 @@
-// 中文姓氏库
+// 常量配置
+const STUDENTS_PER_CLASS = 50;  // 每班50人
+const CLASSES_PER_GRADE = 5;    // 每个年级5个班
+const MAX_STUDENTS_PER_GRADE = STUDENTS_PER_CLASS * CLASSES_PER_GRADE; // 每年级250人
+
+// 存储当前生成的学生数据
+let currentStudents = [];
 const chineseSurnames = [
     '王', '李', '张', '刘', '陈', '杨', '黄', '赵', '吴', '周',
     '徐', '孙', '马', '朱', '胡', '郭', '何', '高', '林', '罗',
@@ -76,6 +82,7 @@ const nameLengthSelect = document.getElementById('nameLength');
 const nameStyleSelect = document.getElementById('nameStyle');
 const generateBtn = document.getElementById('generateBtn');
 const copyBtn = document.getElementById('copyBtn');
+const exportBtn = document.getElementById('exportBtn');
 const nameListDiv = document.getElementById('nameList');
 const chineseOptions = document.querySelector('.chinese-options');
 const englishOptions = document.querySelector('.english-options');
@@ -158,6 +165,15 @@ function generateEnglishName(gender, style) {
     };
 }
 
+// 计算年级和班级
+function calculateGradeAndClass(index) {
+    const grade = Math.floor(index / MAX_STUDENTS_PER_GRADE) + 1;
+    const indexInGrade = index % MAX_STUDENTS_PER_GRADE;
+    const classNum = Math.floor(indexInGrade / STUDENTS_PER_CLASS) + 1;
+    const studentNum = (indexInGrade % STUDENTS_PER_CLASS) + 1;
+    return { grade, classNum, studentNum };
+}
+
 // 生成人名
 function generateNames() {
     const nameType = nameTypeSelect.value;
@@ -176,7 +192,7 @@ function generateNames() {
 
     // 使用 setTimeout 让界面有时间显示加载状态
     setTimeout(() => {
-        let names = [];
+        currentStudents = [];
         let nameSet = new Set(); // 用于避免重复
 
         for (let i = 0; i < count; i++) {
@@ -194,10 +210,17 @@ function generateNames() {
             } while (nameSet.has(nameObj.name) && attempts < maxAttempts);
 
             nameSet.add(nameObj.name);
-            names.push(nameObj);
+
+            // 计算年级和班级
+            const { grade, classNum, studentNum } = calculateGradeAndClass(i);
+            nameObj.grade = grade;
+            nameObj.classNum = classNum;
+            nameObj.studentNum = studentNum;
+
+            currentStudents.push(nameObj);
         }
 
-        displayNames(names);
+        displayNames(currentStudents);
 
         // 隐藏加载状态
         if (count > 20) {
@@ -213,7 +236,7 @@ function generateNames() {
 function copyToClipboard(text) {
     // 尝试使用现代 API
     if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text)
+        return navigator.clipboard.writeText(text)
             .then(() => true)
             .catch(() => fallbackCopyText(text));
     } else {
@@ -247,7 +270,7 @@ function fallbackCopyText(text) {
 // 显示生成的名字
 function displayNames(names) {
     nameListDiv.innerHTML = '';
-    names.forEach(item => {
+    names.forEach((item, index) => {
         const nameItem = document.createElement('div');
         nameItem.className = 'name-item';
         nameItem.dataset.gender = item.gender;
@@ -256,30 +279,41 @@ function displayNames(names) {
         nameText.className = 'name-text';
         nameText.textContent = item.name;
 
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'name-info';
+
+        const gradeTag = document.createElement('span');
+        gradeTag.className = 'grade-tag';
+        gradeTag.textContent = `${item.grade}年级${item.classNum}班`;
+
         const genderTag = document.createElement('span');
         genderTag.className = `gender-tag gender-${item.gender}`;
         genderTag.textContent = item.gender === 'male' ? '男' : '女';
 
+        infoDiv.appendChild(gradeTag);
+        infoDiv.appendChild(genderTag);
+
         nameItem.appendChild(nameText);
-        nameItem.appendChild(genderTag);
+        nameItem.appendChild(infoDiv);
 
         nameItem.onclick = function() {
             const genderText = item.gender === 'male' ? '男' : '女';
-            const textToCopy = `${item.name}\t${genderText}`;
-            const success = copyToClipboard(textToCopy);
-            nameItem.style.background = '#667eea';
-            nameText.style.color = 'white';
-            genderTag.style.color = 'white';
-            setTimeout(() => {
-                nameItem.style.background = isDarkTheme ? '#2a2a3e' : 'white';
-                nameText.style.color = isDarkTheme ? '#e0e0e0' : '#333';
-                genderTag.style.color = '';
-            }, 300);
-            if (success) {
-                showToast(`已复制: ${item.name}`);
-            } else {
-                showToast('复制失败，请手动选择复制');
-            }
+            const textToCopy = `${item.grade}\t${item.classNum}\t${item.name}\t${genderText}`;
+            copyToClipboard(textToCopy).then(success => {
+                nameItem.style.background = '#667eea';
+                nameText.style.color = 'white';
+                genderTag.style.color = 'white';
+                setTimeout(() => {
+                    nameItem.style.background = isDarkTheme ? '#2a2a3e' : 'white';
+                    nameText.style.color = isDarkTheme ? '#e0e0e0' : '#333';
+                    genderTag.style.color = '';
+                }, 300);
+                if (success) {
+                    showToast(`已复制: ${item.name}`);
+                } else {
+                    showToast('复制失败，请手动选择复制');
+                }
+            });
         };
         nameListDiv.appendChild(nameItem);
     });
@@ -287,25 +321,59 @@ function displayNames(names) {
 
 // 复制所有结果
 function copyAllNames() {
-    const nameItems = document.querySelectorAll('.name-item');
-    const names = Array.from(nameItems).map(item => {
-        const nameText = item.querySelector('.name-text').textContent;
-        const genderText = item.querySelector('.gender-tag').textContent;
-        return `${nameText}\t${genderText}`;
+    if (currentStudents.length === 0) {
+        showToast('请先生成学生信息');
+        return;
+    }
+    const names = currentStudents.map(item => {
+        const genderText = item.gender === 'male' ? '男' : '女';
+        return `${item.grade}\t${item.classNum}\t${item.name}\t${genderText}`;
     }).join('\n');
-    if (names) {
-        const success = copyToClipboard(names);
+    copyToClipboard(names).then(success => {
         if (success) {
-            showToast('复制成功！可直接粘贴到 Excel，会自动分成两列！');
+            showToast('复制成功！可直接粘贴到Excel，会自动分成四列！');
         } else {
             showToast('复制失败，请手动选择复制');
         }
+    });
+}
+
+// 导出Excel
+function exportToExcel() {
+    if (currentStudents.length === 0) {
+        showToast('请先生成学生信息');
+        return;
     }
+
+    // 构建数据，按照模板格式
+    const data = [];
+    // 添加表头
+    data.push(['年级', '班级', '学生', '性别', '学号', '民族', '出生日期', '身份证号码', '家庭住址', '成员来源']);
+
+    currentStudents.forEach(item => {
+        const genderText = item.gender === 'male' ? '男' : '女';
+        const gradeNum = item.grade;
+        const classNum = item.classNum;
+        const student = item.name;
+        const studentId = `G${String(item.studentNum).padStart(6, '0')}`;
+
+        data.push([gradeNum, classNum, student, genderText, studentId, '', '', '', '', '']);
+    });
+
+    // 创建工作簿
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '学生信息');
+
+    // 下载文件
+    XLSX.writeFile(wb, '学生信息.xlsx');
+    showToast('导出成功！');
 }
 
 // 事件监听
 generateBtn.addEventListener('click', generateNames);
 copyBtn.addEventListener('click', copyAllNames);
+exportBtn.addEventListener('click', exportToExcel);
 
 // 主题切换功能
 const themeBtn = document.getElementById('themeBtn');
