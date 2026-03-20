@@ -73,7 +73,7 @@ class ADBGUI:
         ttk.Button(device_buttons_frame, text="连接设备(IP)",
                    command=self.connect_device).grid(row=0, column=1, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="insomnia工具",
-                   command=self.show_insomnia_tools).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
+                   command=self.show_tools_window).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="息屏",
                    command=lambda: self.toggle_screen("off")).grid(row=0, column=3, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="亮屏",
