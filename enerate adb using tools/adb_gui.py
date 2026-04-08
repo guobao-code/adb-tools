@@ -73,7 +73,7 @@ class ADBGUI:
         ttk.Button(device_buttons_frame, text="连接设备(IP)",
                    command=self.connect_device).grid(row=0, column=1, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="insomnia工具",
-                   command=self.show_tools_window).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
+                   command=self.show_insomnia_tools).grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="息屏",
                    command=lambda: self.toggle_screen("off")).grid(row=0, column=3, padx=2, pady=2, sticky=(tk.W, tk.E))
         ttk.Button(device_buttons_frame, text="亮屏",
@@ -105,8 +105,10 @@ class ADBGUI:
         self.device_canvas.configure(yscrollcommand=device_scrollbar.set)
         self.device_scrollable_frame.bind("<Configure>", lambda e: self.device_canvas.configure(scrollregion=self.device_canvas.bbox("all")))
 
-        canvas_window = self.device_canvas.create_window((0, 0), window=self.device_scrollable_frame, anchor="nw")
-        self.device_canvas.bind("<Configure>", lambda e: self.device_canvas.itemconfig(canvas_window, width=e.width))
+        self.device_canvas_window = self.device_canvas.create_window(
+            (0, 0), window=self.device_scrollable_frame, anchor="nw"
+        )
+        self.device_canvas.bind("<Configure>", lambda e: self.device_canvas.itemconfig(self.device_canvas_window, width=e.width))
 
         # 添加鼠标滚轮支持（Windows）
         self.device_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
@@ -262,7 +264,11 @@ class ADBGUI:
         # 清空原有卡片（彻底清空）
         self.device_scrollable_frame.destroy()
         self.device_scrollable_frame = ttk.Frame(self.device_canvas, style="DeviceCard.TFrame")
-        canvas_window = self.device_canvas.create_window((0, 0), window=self.device_scrollable_frame, anchor="nw")
+        if hasattr(self, "device_canvas_window"):
+            self.device_canvas.delete(self.device_canvas_window)
+        self.device_canvas_window = self.device_canvas.create_window(
+            (0, 0), window=self.device_scrollable_frame, anchor="nw"
+        )
 
         # 重新绑定 Configure 事件
         self.device_scrollable_frame.bind("<Configure>", lambda e: self.device_canvas.configure(scrollregion=self.device_canvas.bbox("all")))
@@ -636,8 +642,7 @@ class ADBGUI:
             try:
                 # 获取设备列表
                 result = subprocess.run(
-                    "adb devices -l",  # -l 参数获取详细信息
-                    shell=True,
+                    ["adb", "devices", "-l"],
                     capture_output=True,
                     text=True,
                     timeout=10
@@ -851,7 +856,7 @@ class ADBGUI:
                     return
 
             # 执行连接命令
-            adb_cmd = f"adb connect {address}"
+            adb_cmd = ["adb", "connect", address]
             self.append_output(f"执行无线连接命令: {adb_cmd}", "INFO")
 
             def run_connect():
@@ -862,7 +867,6 @@ class ADBGUI:
                     # 第一步：执行连接命令
                     process = subprocess.run(
                         adb_cmd,
-                        shell=True,
                         capture_output=True,
                         text=True,
                         timeout=20
@@ -882,7 +886,12 @@ class ADBGUI:
                         time.sleep(2)
 
                         # 第二步：检查设备是否真的连接成功
-                        check_result = subprocess.run("adb devices -l", shell=True, capture_output=True, text=True, timeout=5)
+                        check_result = subprocess.run(
+                            ["adb", "devices", "-l"],
+                            capture_output=True,
+                            text=True,
+                            timeout=5
+                        )
                         self.append_output(f"设备列表检查: {check_result.stdout}", "INFO")
 
                         # 检查设备是否在列表中
@@ -1085,7 +1094,7 @@ class ADBGUI:
         def run_scrcpy():
             try:
                 self.update_status(f"启动scrcpy控制设备: {device}")
-                subprocess.run(f"scrcpy -s {device}", shell=True)
+                subprocess.run(["scrcpy", "-s", device])
                 self.update_status(f"scrcpy远程控制已结束: {device}")
             except Exception as e:
                 self.append_output(f"启动scrcpy失败: {str(e)}", "ERROR")
@@ -1163,8 +1172,7 @@ class ADBGUI:
                 info_text.insert(tk.END, f"\n{'='*40}\n{title}:\n{'='*40}\n", "TITLE")
                 try:
                     result = subprocess.run(
-                        f"adb -s {device} shell {cmd}",
-                        shell=True,
+                        ["adb", "-s", device, "shell", cmd],
                         capture_output=True,
                         text=True,
                         timeout=8
@@ -1303,14 +1311,14 @@ class ADBGUI:
         def _get_files():
             try:
                 result = subprocess.run(
-                    f'adb -s {device} shell ls -la "{path}"',
-                    shell=True,
+                    ["adb", "-s", device, "shell", "ls", "-la", path],
                     capture_output=True,
                     text=True,
                     timeout=10
                 )
                 
                 if result.returncode == 0:
+                    rows = []
                     lines = result.stdout.strip().split('\n')
                     for line in lines:
                         if line and not line.startswith('total'):
@@ -1320,11 +1328,22 @@ class ADBGUI:
                                 size = parts[4]
                                 name = ' '.join(parts[8:])
                                 ftype = "目录" if perm.startswith('d') else "文件"
-                                file_list.insert("", "end", values=(name, size, ftype))
+                                rows.append((name, size, ftype))
+                    self.root.after(0, lambda: self._render_file_list(file_list, rows))
+                else:
+                    error_msg = result.stderr.strip() or result.stdout.strip() or "未知错误"
+                    self.append_output(f"获取文件列表失败: {error_msg}", "ERROR")
             except Exception as e:
                 self.append_output(f"获取文件列表失败: {str(e)}", "ERROR")
         
         threading.Thread(target=_get_files, daemon=True).start()
+
+    def _render_file_list(self, file_list, rows):
+        """在主线程中刷新文件列表"""
+        for item in file_list.get_children():
+            file_list.delete(item)
+        for row in rows:
+            file_list.insert("", "end", values=row)
 
     def upload_file(self, device, dest_path):
         """上传文件"""
@@ -1429,17 +1448,30 @@ class ADBGUI:
             self.append_output(f"正在为应用 {selected_package} 创建日志目录...", "INFO")
             log_dir = f"/sdcard/Android/data/{selected_package}/files/logs"
             create_cmd = f"adb -s {device} shell mkdir -p \"{log_dir}\""
-            create_result = subprocess.run(create_cmd, shell=True, capture_output=True, text=True, timeout=30)
+            create_result = subprocess.run(
+                ["adb", "-s", device, "shell", "mkdir", "-p", log_dir],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
 
             if create_result.returncode == 0:
                 self.append_output(f"日志目录创建成功: {log_dir}", "SUCCESS")
                 # 检查 files 目录是否存在，不存在也创建
                 files_dir = f"/sdcard/Android/data/{selected_package}/files"
-                check_cmd = f"adb -s {device} shell test -d \"{files_dir}\" || echo \"NOT_EXISTS\""
-                check_result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                check_result = subprocess.run(
+                    ["adb", "-s", device, "shell", "sh", "-c", f'test -d "{files_dir}" || echo "NOT_EXISTS"'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
                 if "NOT_EXISTS" in check_result.stdout:
-                    create_files_cmd = f"adb -s {device} shell mkdir -p \"{files_dir}/logs\""
-                    subprocess.run(create_files_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                    subprocess.run(
+                        ["adb", "-s", device, "shell", "mkdir", "-p", f"{files_dir}/logs"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
                     self.append_output(f"files 目录也创建成功", "SUCCESS")
             else:
                 self.append_output(f"创建日志目录失败: {create_result.stderr}", "ERROR")
@@ -1713,19 +1745,18 @@ class ADBGUI:
                 self.append_output(f"接口: {interface}, IP: {new_ip}, 掩码: {netmask}, 网关: {gateway}", "INFO")
 
                 # 构建修改IP的命令（需要root权限）
-                set_ip_cmd = f"shell su -c 'ifconfig {interface} {new_ip} netmask {netmask}'"
+                remote_set_ip_cmd = f"ifconfig {interface} {new_ip} netmask {netmask}"
                 if gateway:
-                    set_ip_cmd = f"shell su -c 'ifconfig {interface} {new_ip} netmask {netmask} && route add default gw {gateway}'"
+                    remote_set_ip_cmd = f"{remote_set_ip_cmd} && route add default gw {gateway}"
 
-                self.append_output(f"执行命令: adb -s {device} {set_ip_cmd}", "INFO")
+                self.append_output(f"执行命令: adb -s {device} shell su -c \"{remote_set_ip_cmd}\"", "INFO")
 
                 # 执行修改IP命令
                 def run_set_ip():
                     try:
                         # 1. 检查是否有root权限
                         check_root = subprocess.run(
-                            f"adb -s {device} shell su -c 'id'",
-                            shell=True,
+                            ["adb", "-s", device, "shell", "su", "-c", "id"],
                             capture_output=True,
                             text=True,
                             timeout=5
@@ -1742,8 +1773,7 @@ class ADBGUI:
 
                         # 2. 执行修改IP命令
                         result = subprocess.run(
-                            f"adb -s {device} {set_ip_cmd}",
-                            shell=True,
+                            ["adb", "-s", device, "shell", "su", "-c", remote_set_ip_cmd],
                             capture_output=True,
                             text=True,
                             timeout=10
@@ -1784,9 +1814,12 @@ class ADBGUI:
         """确保ADB服务运行"""
         def _check():
             try:
-                subprocess.run("adb devices", shell=True, capture_output=True, timeout=10)
-                self.update_status("ADB服务正常运行")
-                self.root.after(0, self.refresh_devices)
+                result = subprocess.run(["adb", "devices"], capture_output=True, timeout=10)
+                if result.returncode == 0:
+                    self.update_status("ADB服务正常运行")
+                    self.root.after(0, self.refresh_devices)
+                else:
+                    self.root.after(0, self._restart_adb_server)
             except Exception:
                 self.root.after(0, self._restart_adb_server)
 

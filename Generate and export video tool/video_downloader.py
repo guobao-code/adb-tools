@@ -93,10 +93,13 @@ def download_video(url, save_path, backup_ip, max_retries=2):
         "Referer": url.split('/')[0] + "//" + url.split('/')[2],
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     }
+    temp_path = save_path.with_suffix(save_path.suffix + ".part")
     # 原始URL重试
     for attempt in range(max_retries + 1):
         try:
             logging.info(f"下载尝试（{attempt + 1}/{max_retries + 1}）: {url}")
+            if temp_path.exists():
+                temp_path.unlink()
             with requests.get(
                     url,
                     stream=True,
@@ -104,13 +107,16 @@ def download_video(url, save_path, backup_ip, max_retries=2):
                     headers=headers
             ) as response:
                 response.raise_for_status()
-                with open(save_path, "wb") as f:
+                with open(temp_path, "wb") as f:
                     for chunk in response.iter_content(chunk_size=1024 * 1024):
                         if chunk:
                             f.write(chunk)
+                temp_path.replace(save_path)
                 logging.info(f"下载成功：{save_path.name}")
                 return True
         except Exception as e:
+            if temp_path.exists():
+                temp_path.unlink()
             logging.warning(f"原始URL尝试{attempt + 1}失败：{str(e)}")
             if attempt < max_retries:
                 time.sleep(2)
@@ -126,6 +132,8 @@ def download_video(url, save_path, backup_ip, max_retries=2):
     for attempt in range(max_retries + 1):
         try:
             logging.info(f"备用IP尝试（{attempt + 1}/{max_retries + 1}）: {modified_url}")
+            if temp_path.exists():
+                temp_path.unlink()
             with requests.get(
                     modified_url,
                     stream=True,
@@ -133,13 +141,16 @@ def download_video(url, save_path, backup_ip, max_retries=2):
                     headers=headers
             ) as response:
                 response.raise_for_status()
-                with open(save_path, "wb") as f:
+                with open(temp_path, "wb") as f:
                     for chunk in response.iter_content(chunk_size=1024 * 1024):
                         if chunk:
                             f.write(chunk)
+                temp_path.replace(save_path)
                 logging.info(f"备用IP下载成功：{save_path.name}")
                 return True
         except Exception as e:
+            if temp_path.exists():
+                temp_path.unlink()
             logging.warning(f"备用IP尝试{attempt + 1}失败：{str(e)}")
             if attempt < max_retries:
                 time.sleep(2)
@@ -222,6 +233,8 @@ def save_task_data(task, task_path):
 
 def download_single_video(args):
     url, save_path, backup_ip = args
+    with stats_lock:
+        global_stats['total'] += 1
     if save_path.exists() and save_path.stat().st_size > 1024 * 10:
         with stats_lock:
             global_stats['skipped'] += 1
@@ -229,7 +242,6 @@ def download_single_video(args):
         return True, save_path.name
     success = download_video(url, save_path, backup_ip)
     with stats_lock:
-        global_stats['total'] += 1
         if success:
             global_stats['success'] += 1
         else:
