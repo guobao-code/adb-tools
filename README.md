@@ -1,6 +1,6 @@
 # 视频下载、adb管理工具集
 
-本项目是一套用于体育视频获取、设备管理和名称生成的工具集合，包含三个主要功能模块。
+本项目是一套用于体育视频获取和Android设备管理的工具集合，包含三个主要功能模块。
 
 ## 目录
 
@@ -15,8 +15,8 @@
 
 本工具集主要用于：
 - 通过 ADB 管理和操作 Android 设备
-- 批量下载体育比赛视频
-- 生成测试用的中文和英文人名
+- 批量下载体育比赛视频（支持多个视频源）
+- 统一的图形界面入口
 
 ## 功能模块
 
@@ -32,11 +32,13 @@
 - 🛠️ 常用 ADB 工具集
 - 📝 实时日志输出与过滤
 - ⚡ 命令队列管理
+- 🔄 scrcpy 版本检测
 
 **文件结构：**
 ```
 enerate adb using tools/
 ├── adb_gui.py              # 主程序源代码
+├── check_scrcpy_version.py # scrcpy版本检测工具
 ├── ADB工具.spec            # PyInstaller 配置文件
 ├── build_exe.bat           # 打包脚本（正式版）
 ├── build_exe_debug.bat     # 打包脚本（调试版）
@@ -75,33 +77,42 @@ enerate adb using tools/
 ```
 Generate and export video tool/
 ├── video_downloader.py     # 主程序源代码
-├── build.bat               # 打包脚本
-└── 运行前查看！！！         # 使用说明
+├── build.bat              # 打包脚本
+└── 运行前查看！！！        # 使用说明
 ```
 
-### 3. 名称生成器 (name-generator/)
+### 3. 新版视频下载工具 (New-Sport2.0-videos/)
 
-基于 Web 的随机人名生成工具，支持中文和英文人名生成。
+新版体育视频下载工具，支持更多视频源和功能。
 
 **核心功能：**
-- 🎲 中文人名生成（支持 2-4 个字）
-- 🎲 英文人名生成（支持传统/现代/独特风格）
-- ⚧ 性别筛选（随机/男性/女性）
-- 📋 一键复制结果
-- 🌙 深色/浅色主题切换
-- 📱 响应式设计，支持移动端
-
-**技术特点：**
-- 纯前端实现，无需后端
-- 现代化 UI 设计
-- 动画效果增强用户体验
+- 🎥 支持新版体育视频源
+- 🔄 批量下载功能
+- 📝 下载日志记录
+- 🖥️ 图形界面操作
 
 **文件结构：**
 ```
-name-generator/
-├── index.html              # 主页面
-├── script.js               # JavaScript 逻辑
-└── style.css               # 样式表
+New-Sport2.0-videos/
+├── video2.0_downloader.py # 主程序源代码
+├── build.bat              # 打包脚本
+└── download_log.txt        # 下载日志
+```
+
+### 4. 统一入口 (unified_app.py)
+
+整合所有工具的统一图形界面入口，方便管理和使用。
+
+**核心功能：**
+- 🚪 统一入口，启动一个程序即可使用所有工具
+- 📱 ADB 设备管理
+- 🎬 视频下载（多版本可选）
+- 🎨 美观的图形界面
+
+**文件结构：**
+```
+├── unified_app.py         # 统一入口主程序
+└── run_unified.bat        # Windows 快速启动脚本
 ```
 
 ## 快速开始
@@ -111,6 +122,14 @@ name-generator/
 - **Python**: 3.8 或更高版本
 - **操作系统**: Windows
 - **ADB**: Android SDK Platform-Tools（用于 ADB 工具）
+
+### 方式一：使用统一入口（推荐）
+
+双击运行 `run_unified.bat`，或在命令行中执行：
+
+```bash
+python unified_app.py
+```
 
 ### ADB 工具使用
 
@@ -128,9 +147,18 @@ python adb_gui.py
 
 ### 视频下载工具使用
 
+#### 旧版下载工具
+
 ```bash
 cd "d:\git-warehouse\obtain-sports-videos\Generate and export video tool"
 python video_downloader.py
+```
+
+#### 新版下载工具
+
+```bash
+cd "d:\git-warehouse\obtain-sports-videos\New-Sport2.0-videos"
+python video2.0_downloader.py
 ```
 
 按照图形界面提示：
@@ -139,10 +167,6 @@ python video_downloader.py
 3. 设置备份 IP 地址
 4. 选择并发线程数
 5. 点击开始下载
-
-### 名称生成器使用
-
-直接在浏览器中打开 `name-generator/index.html` 文件即可使用。
 
 ## 详细使用说明
 
@@ -166,13 +190,30 @@ cd "d:\git-warehouse\obtain-sports-videos\enerate adb using tools"
 
 ### 视频下载工具打包
 
+#### 旧版工具
+
 ```bash
 cd "d:\git-warehouse\obtain-sports-videos\Generate and export video tool"
 
 # 双击运行 build.bat 进行打包
 ```
 
-打包完成后，可执行文件位于 `dist\视频下载工具.exe`。
+#### 新版工具
+
+```bash
+cd "d:\git-warehouse\obtain-sports-videos\New-Sport2.0-videos"
+
+# 双击运行 build.bat 进行打包
+```
+
+### scrcpy 版本检测
+
+用于检测已安装的 scrcpy 工具版本：
+
+```bash
+cd "d:\git-warehouse\obtain-sports-videos\enerate adb using tools"
+python check_scrcpy_version.py
+```
 
 ## 技术栈
 
@@ -189,10 +230,10 @@ cd "d:\git-warehouse\obtain-sports-videos\Generate and export video tool"
 - **并发处理**: concurrent.futures, threading
 - **数据处理**: json, re, datetime
 
-### 名称生成器
-- **前端技术**: HTML5, CSS3, JavaScript (ES6+)
-- **UI 设计**: 现代化响应式设计
-- **主题**: 深色/浅色主题切换
+### 统一入口
+- **语言**: Python 3.x
+- **GUI 框架**: Tkinter + ttk
+- **模块集成**: subprocess
 
 ## 常见问题
 
@@ -210,6 +251,9 @@ A:
 **Q: 杀毒软件误报？**
 A: 将程序添加到白名单，或使用调试版本查看具体错误。
 
+**Q: scrcpy 版本检测失败？**
+A: 确保 scrcpy 已正确安装并添加到系统 PATH。
+
 ### 视频下载工具
 
 **Q: 下载速度慢？**
@@ -222,15 +266,7 @@ A:
 3. 查看日志输出了解具体错误
 
 **Q: 如何更改默认配置？**
-A: 修改 `video_downloader.py` 顶部的 `DEFAULT_*` 配置变量。
-
-### 名称生成器
-
-**Q: 如何在本地部署？**
-A: 直接打开 `index.html` 文件即可，无需服务器。
-
-**Q: 支持自定义人名字库吗？**
-A: 可以修改 `script.js` 中的字库数组来添加自定义内容。
+A: 修改对应下载工具Python文件顶部的 `DEFAULT_*` 配置变量。
 
 ## 许可证
 
@@ -239,6 +275,10 @@ A: 可以修改 `script.js` 中的字库数组来添加自定义内容。
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request 来改进本项目。
+
+## GitHub
+
+- 仓库地址: https://github.com/guobao-code/adb-tools
 
 ---
 
