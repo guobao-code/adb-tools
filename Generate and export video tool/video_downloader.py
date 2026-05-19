@@ -369,8 +369,10 @@ def download_tasks_videos(tasks, backup_ip, max_workers, gui_log_widget, progres
 class VideoDownloadGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("视频批量下载工具")
-        self.root.geometry("800x700")  # 适当放大窗口，容纳进度条
+        self.embedded = not isinstance(root, (tk.Tk, tk.Toplevel))
+        if not self.embedded:
+            self.root.title("视频批量下载工具")
+            self.root.geometry("800x700")  # 适当放大窗口，容纳进度条
 
         # 1. 初始化控件
         self._init_widgets()
@@ -453,12 +455,19 @@ class VideoDownloadGUI:
     def _config_logging(self):
         # 自定义日志处理器：输出到GUI文本框
         class GuiLogHandler(logging.Handler):
-            def __init__(self, text_widget):
+            def __init__(self, text_widget, source_path):
                 super().__init__()
                 self.text_widget = text_widget
+                self.source_path = Path(source_path).resolve()
                 self.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
             def emit(self, record):
+                try:
+                    if Path(record.pathname).resolve() != self.source_path:
+                        return
+                except Exception:
+                    return
+
                 msg = self.format(record)
                 # 非主线程中更新GUI，需用after()方法
                 def append_msg():
@@ -468,15 +477,29 @@ class VideoDownloadGUI:
                     self.text_widget.config(state=tk.DISABLED)
                 self.text_widget.after(0, append_msg)
 
-        # 配置日志：文件 + GUI文本框
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler("download_log.txt", encoding='utf-8'),
-                GuiLogHandler(self.log_text)
-            ]
+        # 配置日志：文件 + GUI文本框。统一入口中可能会同时加载多个页面，
+        # 所以这里显式追加 handler，避免 basicConfig 只生效一次。
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+
+        log_path = Path("download_log.txt").resolve()
+        has_file_handler = any(
+            isinstance(handler, logging.FileHandler)
+            and Path(handler.baseFilename) == log_path
+            for handler in root_logger.handlers
         )
+        if not has_file_handler:
+            file_handler = logging.FileHandler(log_path, encoding='utf-8')
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
+
+        has_gui_handler = any(
+            getattr(handler, "text_widget", None) is self.log_text
+            for handler in root_logger.handlers
+        )
+        if not has_gui_handler:
+            root_logger.addHandler(GuiLogHandler(self.log_text, __file__))
 
     def _get_valid_timestamp(self, time_str, default_dt):
         """验证时间输入并返回毫秒时间戳"""

@@ -10,14 +10,17 @@ import time
 import sys
 import re
 from insomnia_gui import InsomniaGUI
+import requests
 
 
 class ADBGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("ADB 工具 - 国保增强版")
-        self.root.geometry("1100x700")
-        self.root.minsize(800, 650)
+        self.embedded = not isinstance(root, (tk.Tk, tk.Toplevel))
+        if not self.embedded:
+            self.root.title("ADB 工具 - 国保增强版")
+            self.root.geometry("1100x700")
+            self.root.minsize(800, 650)
 
         # 根窗口权重配置
         self.root.columnconfigure(0, weight=1)
@@ -201,7 +204,8 @@ class ADBGUI:
 
         # 初始化操作
         self._start_command_processor()
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        if not self.embedded:
+            self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # 延迟启动ADB检查，确保GUI完全加载
         self.root.after(500, self.ensure_adb_server_running)
@@ -1091,10 +1095,13 @@ class ADBGUI:
                 webbrowser.open("https://github.com/Genymobile/scrcpy")
             return
 
+        self.check_scrcpy_version()
+
         def run_scrcpy():
             try:
                 self.update_status(f"启动scrcpy控制设备: {device}")
-                subprocess.run(["scrcpy", "-s", device])
+                # 使用 --no-audio 禁用音频，避免 WASAPI 音频冲突导致的断开问题
+                subprocess.run(["scrcpy", "-s", device, "--no-audio"])
                 self.update_status(f"scrcpy远程控制已结束: {device}")
             except Exception as e:
                 self.append_output(f"启动scrcpy失败: {str(e)}", "ERROR")
@@ -1102,6 +1109,50 @@ class ADBGUI:
         thread = threading.Thread(target=run_scrcpy)
         thread.daemon = True
         thread.start()
+
+    def check_scrcpy_version(self):
+        """检查scrcpy是否为最新版本"""
+        try:
+            # 获取当前安装的版本
+            result = subprocess.run(["scrcpy", "--version"], capture_output=True, text=True, timeout=5)
+            output = result.stdout.strip()
+            # 解析版本号，例如 "scrcpy 1.24"
+            import re
+            match = re.search(r'scrcpy\s+([\d.]+)', output)
+            if match:
+                current_version = match.group(1)
+                self.append_output(f"当前scrcpy版本: {current_version}", "INFO")
+            else:
+                self.append_output(f"无法解析scrcpy版本，输出: {output}", "WARNING")
+                return
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            self.append_output("scrcpy未安装，请先安装scrcpy", "ERROR")
+            return
+        except Exception as e:
+            self.append_output(f"检查scrcpy版本时出错: {str(e)}", "ERROR")
+            return
+
+        # 尝试获取最新版本
+        try:
+            import requests
+            response = requests.get("https://api.github.com/repos/Genymobile/scrcpy/releases/latest", timeout=10)
+            if response.status_code == 200:
+                latest_version = response.json()["tag_name"]
+                # 移除可能的前缀 'v'
+                latest_version = latest_version.lstrip('v')
+                self.append_output(f"最新scrcpy版本: {latest_version}", "INFO")
+                # 比较版本
+                if current_version == latest_version:
+                    self.append_output("恭喜！您的scrcpy是最新版本。", "SUCCESS")
+                else:
+                    self.append_output(f"您的scrcpy版本不是最新的。建议升级到版本 {latest_version}。", "WARNING")
+                    self.append_output("下载地址: https://github.com/Genymobile/scrcpy/releases", "INFO")
+            else:
+                self.append_output(f"无法获取最新版本信息，HTTP状态码: {response.status_code}", "WARNING")
+                self.append_output("请手动检查 https://github.com/Genymobile/scrcpy/releases", "INFO")
+        except requests.exceptions.RequestException as e:
+            self.append_output(f"网络请求失败，无法检查最新版本: {str(e)}", "WARNING")
+            self.append_output("请手动检查 https://github.com/Genymobile/scrcpy/releases", "INFO")
 
     def install_apk(self, device=None):
         """安装APK（支持单个设备或所有设备）"""
@@ -1914,8 +1965,12 @@ class ADBGUI:
     def on_closing(self):
         """退出处理"""
         if messagebox.askokcancel("退出", "确定要退出ADB工具吗？"):
-            self.command_queue.put((None, None, 0))
+            self.shutdown()
             self.root.destroy()
+
+    def shutdown(self):
+        """释放后台命令处理线程。统一入口关闭时会调用。"""
+        self.command_queue.put((None, None, 0))
 
 
 def main():
