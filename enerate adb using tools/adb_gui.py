@@ -9,14 +9,77 @@ import socket
 import time
 import sys
 import re
+import webbrowser
+import shutil
 from insomnia_gui import InsomniaGUI
 import requests
+
+
+def hidden_subprocess_kwargs():
+    """Hide console windows for child processes when running as a Windows GUI app."""
+    if os.name != "nt":
+        return {}
+
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    }
+
+
+def resolve_executable(name):
+    """Find a nearby executable before falling back to PATH lookup."""
+    candidates = []
+    suffixes = [""]
+    if os.name == "nt" and not name.lower().endswith(".exe"):
+        suffixes.append(".exe")
+
+    search_dirs = [
+        os.getcwd(),
+        getattr(sys, "_MEIPASS", None),
+        os.path.dirname(sys.executable),
+        os.path.dirname(os.path.abspath(__file__)),
+    ]
+
+    for directory in search_dirs:
+        if not directory:
+            continue
+        for suffix in suffixes:
+            candidates.append(os.path.join(directory, name + suffix))
+
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+
+    return shutil.which(name) or (shutil.which(name + ".exe") if os.name == "nt" else None)
 
 
 class ADBGUI:
     def __init__(self, root):
         self.root = root
         self.embedded = not isinstance(root, (tk.Tk, tk.Toplevel))
+        self.palette = {
+            "app_bg": "#eef7ff",
+            "panel_bg": "#ffffff",
+            "surface_bg": "#f7fbff",
+            "hover_bg": "#e1f0ff",
+            "border": "#b9d8f6",
+            "text": "#102033",
+            "muted": "#4f6f8f",
+            "primary": "#1d7fd6",
+            "primary_hover": "#1669b2",
+            "success": "#149447",
+            "warning": "#d97706",
+            "error": "#dc2626",
+            "timestamp": "#5d7690",
+            "line": "#c9ddf4",
+        }
+        try:
+            self.root.configure(background=self.palette["app_bg"])
+        except tk.TclError:
+            pass
         if not self.embedded:
             self.root.title("ADB 工具 - 国保增强版")
             self.root.geometry("1100x700")
@@ -37,11 +100,11 @@ class ADBGUI:
 
         # 输出日志配置
         self.log_colors = {
-            "INFO": "#000000",      # 普通信息-黑色
-            "SUCCESS": "#008000",    # 成功-绿色
-            "WARNING": "#FF8C00",    # 警告-橙色
-            "ERROR": "#FF0000",      # 错误-红色
-            "TIMESTAMP": "#808080"   # 时间戳-灰色
+            "INFO": self.palette["text"],
+            "SUCCESS": self.palette["success"],
+            "WARNING": self.palette["warning"],
+            "ERROR": self.palette["error"],
+            "TIMESTAMP": self.palette["timestamp"],
         }
         self.auto_scroll = tk.BooleanVar(value=True)  # 自动滚动开关
         self.filter_keyword = tk.StringVar(value="")  # 日志过滤关键词
@@ -50,6 +113,33 @@ class ADBGUI:
 
         # 初始化 Insomnia 工具模块
         self.insomnia_gui = InsomniaGUI(root)
+
+    def _get_dialog_parent(self):
+        parent = self.root
+        if not isinstance(parent, (tk.Tk, tk.Toplevel)) and hasattr(parent, 'winfo_toplevel'):
+            try:
+                parent = parent.winfo_toplevel()
+            except Exception:
+                pass
+        return parent
+
+    def _showinfo(self, title, message, parent=None, **kwargs):
+        return messagebox.showinfo(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _showwarning(self, title, message, parent=None, **kwargs):
+        return messagebox.showwarning(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _showerror(self, title, message, parent=None, **kwargs):
+        return messagebox.showerror(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _askyesno(self, title, message, parent=None, **kwargs):
+        return messagebox.askyesno(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _askokcancel(self, title, message, parent=None, **kwargs):
+        return messagebox.askokcancel(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _askquestion(self, title, message, parent=None, **kwargs):
+        return messagebox.askquestion(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
 
         # 创建主框架（改用PanedWindow实现可拖拽调整区域大小）
         main_paned = ttk.PanedWindow(root, orient=tk.VERTICAL)
@@ -93,7 +183,7 @@ class ADBGUI:
         ttk.Entry(device_filter_frame, textvariable=self.device_search_var, width=20).grid(row=0, column=1, padx=2, pady=2)
 
         # 设备状态标签
-        self.device_status_label = ttk.Label(device_frame, text="正在检测设备...", foreground="blue")
+        self.device_status_label = ttk.Label(device_frame, text="正在检测设备...", foreground=self.palette["primary"])
         self.device_status_label.pack(fill=tk.X, pady=(0, 5))
 
         # 设备列表容器（可滚动 + 自适应卡片布局）
@@ -101,7 +191,7 @@ class ADBGUI:
         device_list_container.pack(fill=tk.BOTH, expand=True)
 
         # 设备列表滚动区域
-        self.device_canvas = tk.Canvas(device_list_container, bg="#f8f9fa", highlightthickness=0)
+        self.device_canvas = tk.Canvas(device_list_container, bg=self.palette["app_bg"], highlightthickness=0)
         device_scrollbar = ttk.Scrollbar(device_list_container, orient="vertical", command=self.device_canvas.yview)
         self.device_scrollable_frame = ttk.Frame(self.device_canvas, style="DeviceCard.TFrame")
 
@@ -181,8 +271,8 @@ class ADBGUI:
             output_frame,
             wrap=tk.WORD,
             font=("Consolas", 10),
-            bg="#ffffff",
-            fg="#000000",
+            bg=self.palette["panel_bg"],
+            fg=self.palette["text"],
             relief=tk.FLAT,
             borderwidth=1
         )
@@ -191,7 +281,7 @@ class ADBGUI:
         # 设置日志文本框标签（用于颜色高亮）
         for level, color in self.log_colors.items():
             self.output_text.tag_configure(level, foreground=color)
-        self.output_text.tag_configure("LINE", foreground="#e0e0e0")  # 行号颜色
+        self.output_text.tag_configure("LINE", foreground=self.palette["line"])  # 行号颜色
         self.output_text.tag_configure("TITLE", font=("Microsoft YaHei", 10, "bold"))  # 设备信息标题样式
 
         # 状态栏
@@ -214,19 +304,48 @@ class ADBGUI:
     def setup_styles(self):
         """配置自定义样式"""
         style = ttk.Style()
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+
+        style.configure(".", background=self.palette["panel_bg"], foreground=self.palette["text"])
+        style.configure("TFrame", background=self.palette["panel_bg"])
+        style.configure("TLabelframe", background=self.palette["surface_bg"], bordercolor=self.palette["border"], relief=tk.GROOVE)
+        style.configure(
+            "TLabelframe.Label",
+            background=self.palette["surface_bg"],
+            foreground=self.palette["primary"],
+            font=("Microsoft YaHei", 10, "bold"),
+        )
+        style.configure("TLabel", background=self.palette["panel_bg"], foreground=self.palette["text"])
+        style.configure("TCheckbutton", background=self.palette["panel_bg"], foreground=self.palette["text"])
+        style.configure("TCombobox", fieldbackground=self.palette["panel_bg"], foreground=self.palette["text"])
+        style.configure(
+            "TButton",
+            background="#e7f3ff",
+            foreground=self.palette["text"],
+            bordercolor=self.palette["border"],
+            focusthickness=1,
+            focuscolor=self.palette["primary"],
+            padding=4,
+        )
+        style.map(
+            "TButton",
+            background=[("pressed", "#c8e4ff"), ("active", "#d9ecff"), ("disabled", "#edf3f9")],
+            foreground=[("disabled", "#8aa0b4")],
+        )
         
         # 设备卡片样式
-        style.configure("DeviceCard.TFrame", background="#ffffff", relief=tk.RAISED, borderwidth=1)
+        style.configure("DeviceCard.TFrame", background=self.palette["panel_bg"], relief=tk.RAISED, borderwidth=1)
         # 补充悬停样式
-        style.configure("Hover.TFrame", background="#e9f5ff", relief=tk.RAISED, borderwidth=2)
+        style.configure("Hover.TFrame", background=self.palette["hover_bg"], relief=tk.RAISED, borderwidth=2)
         
-        style.configure("DeviceCard.TLabel", font=("Microsoft YaHei", 9))
-        style.configure("DeviceStatus.Online.TLabel", foreground="#28a745")
-        style.configure("DeviceStatus.Offline.TLabel", foreground="#dc3545")
-        style.configure("DeviceStatus.Unauthorized.TLabel", foreground="#ffc107")
+        style.configure("DeviceCard.TLabel", background=self.palette["panel_bg"], foreground=self.palette["text"], font=("Microsoft YaHei", 9))
+        style.configure("DeviceStatus.Online.TLabel", background=self.palette["panel_bg"], foreground=self.palette["success"])
+        style.configure("DeviceStatus.Offline.TLabel", background=self.palette["panel_bg"], foreground=self.palette["error"])
+        style.configure("DeviceStatus.Unauthorized.TLabel", background=self.palette["panel_bg"], foreground=self.palette["warning"])
         
         # 按钮样式
-        style.configure("Action.TButton", font=("Microsoft YaHei", 9), padding=2)
+        style.configure("Action.TButton", font=("Microsoft YaHei", 9), padding=4)
 
     # ========== 设备显示区域优化核心方法 ==========
 
@@ -319,7 +438,7 @@ class ADBGUI:
 
         # 显示已授权设备
         if devices:
-            self.device_status_label.config(text=f"已授权设备: {len(devices)} 个 | 未授权设备: {len(unauthorized_devices)} 个", foreground="#28a745")
+            self.device_status_label.config(text=f"已授权设备: {len(devices)} 个 | 未授权设备: {len(unauthorized_devices)} 个", foreground=self.palette["success"])
 
             row = 0
             col = 0
@@ -343,7 +462,7 @@ class ADBGUI:
                 device_detail = self.device_details.get(device_id, {})
                 dev_type = device_detail.get("type", "未知")
                 dev_type_text = "📶 无线" if dev_type == "wireless" else "🔌 有线"
-                type_label = ttk.Label(card_frame, text=dev_type_text, font=("Microsoft YaHei", font_size_small), foreground="#6c757d")
+                type_label = ttk.Label(card_frame, text=dev_type_text, font=("Microsoft YaHei", font_size_small), foreground=self.palette["muted"])
                 type_label.pack(fill=tk.X, pady=pady_text)
 
                 # 设备型号
@@ -354,7 +473,7 @@ class ADBGUI:
                 # IP地址（仅无线设备）
                 if dev_type == "wireless":
                     ip = device_detail.get("ip", "未知IP")
-                    ip_label = ttk.Label(card_frame, text=f"IP: {ip}", font=("Microsoft YaHei", font_size_normal), foreground="#007bff")
+                    ip_label = ttk.Label(card_frame, text=f"IP: {ip}", font=("Microsoft YaHei", font_size_normal), foreground=self.palette["primary"])
                     ip_label.pack(fill=tk.X, pady=pady_text)
 
                 # 状态标签
@@ -419,7 +538,7 @@ class ADBGUI:
                 status_label.pack(fill=tk.X, pady=(0, 8))
 
                 # 提示信息
-                tip_label = ttk.Label(card_frame, text="请在设备上允许USB调试授权", font=("Microsoft YaHei", 8), foreground="#6c757d", wraplength=int(card_width * 0.9))
+                tip_label = ttk.Label(card_frame, text="请在设备上允许USB调试授权", font=("Microsoft YaHei", 8), foreground=self.palette["muted"], wraplength=int(card_width * 0.9))
                 tip_label.pack(fill=tk.X, pady=(0, 5))
 
                 # 操作按钮
@@ -438,8 +557,8 @@ class ADBGUI:
 
         # 无设备时的提示
         if not devices and not unauthorized_devices:
-            self.device_status_label.config(text="未检测到任何设备", foreground="#6c757d")
-            empty_label = ttk.Label(self.device_scrollable_frame, text="📱 暂无设备连接 ",font=("Microsoft YaHei", 12), foreground="#6c757d", justify=tk.CENTER)
+            self.device_status_label.config(text="未检测到任何设备", foreground=self.palette["muted"])
+            empty_label = ttk.Label(self.device_scrollable_frame, text="📱 暂无设备连接 ",font=("Microsoft YaHei", 12), foreground=self.palette["muted"], justify=tk.CENTER)
             empty_label.pack(expand=True, pady=50)
 
         # 更新滚动区域
@@ -504,6 +623,7 @@ class ADBGUI:
     def export_log(self):
         """导出日志到文件"""
         file_path = filedialog.asksaveasfilename(
+            parent=self.root,
             title="导出日志",
             defaultextension=".log",
             filetypes=[("日志文件", "*.log"), ("文本文件", "*.txt"), ("所有文件", "*.*")]
@@ -518,7 +638,7 @@ class ADBGUI:
 
     def clear_output(self):
         """清空日志（带确认）"""
-        if messagebox.askyesno("确认清空", "确定要清空所有日志吗？"):
+        if self._askyesno("确认清空", "确定要清空所有日志吗？"):
             self.output_text.delete(1.0, tk.END)
             self.raw_logs.clear()  # 同时清空原始日志列表
             self.append_output("日志已清空", "INFO")
@@ -528,7 +648,7 @@ class ADBGUI:
         """全局主板信息查询（处理无设备/单个设备/多个设备场景）"""
         # 1. 无已授权设备时给出提示
         if not self.devices_list:
-            messagebox.showinfo("提示", "没有已授权设备可查询主板信息！")
+            self._showinfo("提示", "没有已授权设备可查询主板信息！")
             return
         
         # 2. 单个设备直接查询
@@ -598,7 +718,8 @@ class ADBGUI:
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding='utf-8',
-                errors='ignore'
+                errors='ignore',
+                **hidden_subprocess_kwargs()
             )
 
             while True:
@@ -649,7 +770,8 @@ class ADBGUI:
                     ["adb", "devices", "-l"],
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=10,
+                    **hidden_subprocess_kwargs()
                 )
                 lines = result.stdout.strip().split('\n')
                 
@@ -797,7 +919,7 @@ class ADBGUI:
         port_var = tk.StringVar(value="5555")
         port_entry = ttk.Entry(main_frame, textvariable=port_var, font=("Microsoft YaHei", 10), width=10)
         port_entry.grid(row=1, column=1, padx=5, pady=8, sticky=tk.W)
-        ttk.Label(main_frame, text="默认5555，无需修改", font=("Microsoft YaHei", 8), foreground="#6c757d").grid(row=1, column=2, padx=5, pady=8, sticky=tk.W)
+        ttk.Label(main_frame, text="默认5555，无需修改", font=("Microsoft YaHei", 8), foreground=self.palette["muted"]).grid(row=1, column=2, padx=5, pady=8, sticky=tk.W)
 
         # 常用IP预设（优化布局）
         preset_frame = ttk.LabelFrame(main_frame, text="常用IP地址", padding="8")
@@ -824,7 +946,7 @@ class ADBGUI:
             "• 防火墙可能会阻止无线ADB连接"
         ]
         for i, tip in enumerate(tips):
-            ttk.Label(tips_frame, text=tip, font=("Microsoft YaHei", 9), foreground="#6c757d").grid(row=i, column=0, sticky=tk.W, padx=2, pady=1)
+            ttk.Label(tips_frame, text=tip, font=("Microsoft YaHei", 9), foreground=self.palette["muted"]).grid(row=i, column=0, sticky=tk.W, padx=2, pady=1)
 
         # 操作按钮
         btn_frame = ttk.Frame(main_frame)
@@ -836,7 +958,7 @@ class ADBGUI:
             port = port_var.get().strip()
 
             if not ip:
-                messagebox.showwarning("警告", "请输入设备IP地址！", parent=self.connect_dialog)
+                self._showwarning("警告", "请输入设备IP地址！", parent=self.connect_dialog)
                 return
 
             if not port:
@@ -851,7 +973,7 @@ class ADBGUI:
                 self.append_output(f"网络检测异常: {str(e)}", "WARNING")
 
             if not network_ok:
-                result = messagebox.askyesno(
+                result = self._askyesno(
                     "网络检测提示",
                     f"未检测到 {ip}:{port} 的网络连接\n可能是防火墙/设备未就绪\n是否继续尝试连接？",
                     parent=self.connect_dialog
@@ -873,7 +995,8 @@ class ADBGUI:
                         adb_cmd,
                         capture_output=True,
                         text=True,
-                        timeout=20
+                        timeout=20,
+                        **hidden_subprocess_kwargs()
                     )
 
                     # 输出结果
@@ -894,7 +1017,8 @@ class ADBGUI:
                             ["adb", "devices", "-l"],
                             capture_output=True,
                             text=True,
-                            timeout=5
+                            timeout=5,
+                            **hidden_subprocess_kwargs()
                         )
                         self.append_output(f"设备列表检查: {check_result.stdout}", "INFO")
 
@@ -928,7 +1052,7 @@ class ADBGUI:
                                 # 直接在主线程关闭弹窗
                                 self.root.after(0, self.connect_dialog.destroy)
                                 # 显示授权提示
-                                self.root.after(100, lambda: messagebox.showwarning(
+                                self.root.after(100, lambda: self._showwarning(
                                     "需要授权",
                                     f"设备 {address} 已连接，但需要在设备上手动授权！\n\n请在设备上点击'允许USB调试'，然后点击刷新设备列表。",
                                     parent=self.root
@@ -952,15 +1076,14 @@ class ADBGUI:
                                 self.root.after(0, close_dialog_and_refresh)
                                 # 刷新设备列表
                                 self.root.after(100, self.refresh_devices)
-                                # 显示成功提示
-                                self.root.after(300, lambda: messagebox.showinfo("成功", f"已连接到设备 {address}", parent=self.root))
+                                self.append_output(f"已连接到设备 {address}", "SUCCESS")
                                 return
                         else:
                             self.update_status(f"设备 {address} 未在列表中")
                             # 直接在主线程关闭弹窗
                             self.root.after(0, self.connect_dialog.destroy)
                             # 延迟显示错误提示
-                            self.root.after(100, lambda: messagebox.showerror(
+                            self.root.after(100, lambda: self._showerror(
                                 "连接失败",
                                 f"设备 {address} 连接命令执行成功，但未在设备列表中找到！\n\n可能原因:\n1. 设备防火墙阻止\n2. 设备IP地址变更\n3. 设备未开启ADB调试\n\n当前设备列表:\n{check_result.stdout}",
                                 parent=self.root
@@ -971,7 +1094,7 @@ class ADBGUI:
                         # 直接在主线程关闭弹窗
                         self.root.after(0, self.connect_dialog.destroy)
                         # 延迟显示错误提示
-                        self.root.after(100, lambda: messagebox.showerror("失败",
+                        self.root.after(100, lambda: self._showerror("失败",
                             f"连接失败！\n命令: {adb_cmd}\n输出: {process.stdout}\n错误: {process.stderr}",
                             parent=self.root))
                         return
@@ -983,7 +1106,7 @@ class ADBGUI:
                     # 直接在主线程关闭弹窗
                     self.root.after(0, self.connect_dialog.destroy)
                     # 延迟显示错误提示
-                    self.root.after(100, lambda: messagebox.showerror("错误", error_msg, parent=self.root))
+                    self.root.after(100, lambda: self._showerror("错误", error_msg, parent=self.root))
                     return
 
             thread = threading.Thread(target=run_connect)
@@ -1007,12 +1130,12 @@ class ADBGUI:
     def toggle_screen(self, action=None):
         """切换屏幕状态（息屏/亮屏）"""
         if not self.devices_list:
-            messagebox.showinfo("提示", "没有已授权设备可操作")
+            self._showinfo("提示", "没有已授权设备可操作")
             return
 
         # 如果没有指定操作，使用原来的切换逻辑
         if action is None:
-            confirm = messagebox.askyesno("确认操作", f"是否对 {len(self.devices_list)} 个设备执行屏幕状态切换？")
+            confirm = self._askyesno("确认操作", f"是否对 {len(self.devices_list)} 个设备执行屏幕状态切换？")
             if not confirm:
                 return
 
@@ -1027,10 +1150,10 @@ class ADBGUI:
             # 指定操作：息屏或亮屏
             if action == "off":
                 action_name = "息屏"
-                confirm = messagebox.askyesno("确认操作", f"是否对 {len(self.devices_list)} 个设备执行息屏操作？")
+                confirm = self._askyesno("确认操作", f"是否对 {len(self.devices_list)} 个设备执行息屏操作？")
             else:  # action == "on"
                 action_name = "亮屏"
-                confirm = messagebox.askyesno("确认操作", f"是否对 {len(self.devices_list)} 个设备执行亮屏操作？")
+                confirm = self._askyesno("确认操作", f"是否对 {len(self.devices_list)} 个设备执行亮屏操作？")
 
             if not confirm:
                 return
@@ -1055,7 +1178,7 @@ class ADBGUI:
         self.append_output(f"[DEBUG] 获取到的命令: '{custom_cmd}'", "INFO")  # 调试日志
 
         if not custom_cmd:
-            messagebox.showwarning("警告", "请输入ADB命令！")
+            self._showwarning("警告", "请输入ADB命令！")
             self.cmd_input_entry.focus()
             return
 
@@ -1082,10 +1205,9 @@ class ADBGUI:
 
     def remote_control_device(self, device):
         """远程控制"""
-        try:
-            subprocess.run(["scrcpy", "--version"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            result = messagebox.askquestion(
+        scrcpy_path = resolve_executable("scrcpy")
+        if not scrcpy_path:
+            result = self._askquestion(
                 "scrcpy未安装",
                 "未找到scrcpy，请先安装：\nWindows: 下载后添加到PATH\nmacOS: brew install scrcpy\nLinux: sudo apt install scrcpy\n\n是否打开下载页面？",
                 icon='warning'
@@ -1095,13 +1217,17 @@ class ADBGUI:
                 webbrowser.open("https://github.com/Genymobile/scrcpy")
             return
 
-        self.check_scrcpy_version()
-
         def run_scrcpy():
             try:
                 self.update_status(f"启动scrcpy控制设备: {device}")
-                # 使用 --no-audio 禁用音频，避免 WASAPI 音频冲突导致的断开问题
-                subprocess.run(["scrcpy", "-s", device, "--no-audio"])
+                self.append_output(f"启动scrcpy控制设备: {device}", "INFO")
+                process = subprocess.Popen(
+                    [scrcpy_path, "-s", device, "--no-audio"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self.root.after(0, lambda: self.update_status(f"scrcpy已启动: {device}"))
+                process.wait()
                 self.update_status(f"scrcpy远程控制已结束: {device}")
             except Exception as e:
                 self.append_output(f"启动scrcpy失败: {str(e)}", "ERROR")
@@ -1114,7 +1240,13 @@ class ADBGUI:
         """检查scrcpy是否为最新版本"""
         try:
             # 获取当前安装的版本
-            result = subprocess.run(["scrcpy", "--version"], capture_output=True, text=True, timeout=5)
+            result = subprocess.run(
+                ["scrcpy", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                **hidden_subprocess_kwargs()
+            )
             output = result.stdout.strip()
             # 解析版本号，例如 "scrcpy 1.24"
             import re
@@ -1159,7 +1291,7 @@ class ADBGUI:
         # 选择要安装的设备
         if not device:
             if not self.devices_list:
-                messagebox.showinfo("提示", "没有已授权设备可操作")
+                self._showinfo("提示", "没有已授权设备可操作")
                 return
 
             # 多个设备时选择目标设备
@@ -1172,6 +1304,7 @@ class ADBGUI:
 
         # 选择APK文件
         file_path = filedialog.askopenfilename(
+            parent=self.root,
             title="选择APK文件",
             filetypes=[("APK文件", "*.apk"), ("所有文件", "*.*")]
         )
@@ -1226,7 +1359,8 @@ class ADBGUI:
                         ["adb", "-s", device, "shell", cmd],
                         capture_output=True,
                         text=True,
-                        timeout=8
+                        timeout=8,
+                        **hidden_subprocess_kwargs()
                     )
                     if result.returncode == 0:
                         # 根据标题截取输出内容
@@ -1248,7 +1382,7 @@ class ADBGUI:
         info_text = scrolledtext.ScrolledText(main_frame, font=("Consolas", 10), wrap=tk.WORD)
         info_text.pack(fill=tk.BOTH, expand=True, pady=10)
         info_text.tag_configure("TITLE", font=("Microsoft YaHei", 10, "bold"))
-        info_text.tag_configure("ERROR", foreground="#dc3545")
+        info_text.tag_configure("ERROR", foreground=self.palette["error"])
 
         # 操作按钮
         btn_frame = ttk.Frame(main_frame)
@@ -1263,6 +1397,7 @@ class ADBGUI:
     def export_device_info(self, info, device):
         """导出设备信息"""
         file_path = filedialog.asksaveasfilename(
+            parent=self.root,
             title="导出设备信息",
             defaultextension=".txt",
             initialfile=f"设备信息_{device}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
@@ -1280,7 +1415,7 @@ class ADBGUI:
         """文件管理器（增强：支持双击进入文件夹）"""
         if not device:
             if not self.devices_list:
-                messagebox.showwarning("警告", "无可用设备")
+                self._showwarning("警告", "无可用设备")
                 return
             if len(self.devices_list) > 1:
                 device = self.ask_select_device()
@@ -1365,7 +1500,8 @@ class ADBGUI:
                     ["adb", "-s", device, "shell", "ls", "-la", path],
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=10,
+                    **hidden_subprocess_kwargs()
                 )
                 
                 if result.returncode == 0:
@@ -1398,7 +1534,7 @@ class ADBGUI:
 
     def upload_file(self, device, dest_path):
         """上传文件"""
-        file_path = filedialog.askopenfilename(title="选择文件")
+        file_path = filedialog.askopenfilename(parent=self.root, title="选择文件")
         if file_path:
             dest = os.path.join(dest_path, os.path.basename(file_path)).replace('\\', '/')
             self.execute_adb_command(f'push "{file_path}" "{dest}"', device)
@@ -1407,21 +1543,21 @@ class ADBGUI:
         """下载文件"""
         selection = file_list.selection()
         if not selection:
-            messagebox.showwarning("警告", "请选择文件")
+            self._showwarning("警告", "请选择文件")
             return
 
         item = file_list.item(selection[0])
         name = item['values'][0]
         path = os.path.join(self.current_path_var.get(), name).replace('\\', '/')
 
-        save_path = filedialog.asksaveasfilename(initialfile=name)
+        save_path = filedialog.asksaveasfilename(parent=self.root, initialfile=name)
         if save_path:
             self.execute_adb_command(f'pull "{path}" "{save_path}"', device)
 
     def pull_device_logs(self, device):
         """获取设备当天日志"""
         # 选择保存目录
-        save_dir = filedialog.askdirectory(title="选择日志保存目录")
+        save_dir = filedialog.askdirectory(parent=self.root, title="选择日志保存目录")
         if not save_dir:
             return
 
@@ -1448,7 +1584,7 @@ class ADBGUI:
             main_frame.pack(fill=tk.BOTH, expand=True)
 
             ttk.Label(main_frame, text=f"在设备 {device} 上未找到日志目录", font=("Microsoft YaHei", 11, "bold")).pack(pady=(0, 15))
-            ttk.Label(main_frame, text="请输入应用包名，程序将自动创建日志目录", font=("Microsoft YaHei", 9), foreground="#6c757d").pack(pady=(0, 10))
+            ttk.Label(main_frame, text="请输入应用包名，程序将自动创建日志目录", font=("Microsoft YaHei", 9), foreground=self.palette["muted"]).pack(pady=(0, 10))
 
             input_frame = ttk.Frame(main_frame)
             input_frame.pack(fill=tk.X, pady=(0, 15))
@@ -1465,14 +1601,14 @@ class ADBGUI:
             tips_frame.pack(fill=tk.X, pady=(0, 15))
             tips = ["cn.aisports.app", "com.zl.sport", "cn.aisports"]
             for i, tip in enumerate(tips):
-                ttk.Label(tips_frame, text=f"• {tip}", font=("Microsoft YaHei", 8), foreground="#6c757d").grid(row=i//3, column=i%3, sticky=tk.W, padx=10, pady=2)
+                ttk.Label(tips_frame, text=f"• {tip}", font=("Microsoft YaHei", 8), foreground=self.palette["muted"]).grid(row=i//3, column=i%3, sticky=tk.W, padx=10, pady=2)
 
             result = {'confirmed': False, 'package': ''}
 
             def on_confirm():
                 pkg = package_var.get().strip()
                 if not pkg:
-                    messagebox.showwarning("警告", "请输入应用包名！", parent=dialog)
+                    self._showwarning("警告", "请输入应用包名！", parent=dialog)
                     return
                 result['confirmed'] = True
                 result['package'] = pkg
@@ -1503,7 +1639,8 @@ class ADBGUI:
                 ["adb", "-s", device, "shell", "mkdir", "-p", log_dir],
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
+                **hidden_subprocess_kwargs()
             )
 
             if create_result.returncode == 0:
@@ -1514,19 +1651,21 @@ class ADBGUI:
                     ["adb", "-s", device, "shell", "sh", "-c", f'test -d "{files_dir}" || echo "NOT_EXISTS"'],
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=10,
+                    **hidden_subprocess_kwargs()
                 )
                 if "NOT_EXISTS" in check_result.stdout:
                     subprocess.run(
                         ["adb", "-s", device, "shell", "mkdir", "-p", f"{files_dir}/logs"],
                         capture_output=True,
                         text=True,
-                        timeout=10
+                        timeout=10,
+                        **hidden_subprocess_kwargs()
                     )
                     self.append_output(f"files 目录也创建成功", "SUCCESS")
             else:
                 self.append_output(f"创建日志目录失败: {create_result.stderr}", "ERROR")
-                messagebox.showerror("错误", f"创建日志目录失败！\n\n{create_result.stderr}", parent=self.root)
+                self._showerror("错误", f"创建日志目录失败！\n\n{create_result.stderr}", parent=self.root)
                 return
         else:
             # 如果找到多个包，让用户选择
@@ -1625,7 +1764,7 @@ class ADBGUI:
             # 方法1: 使用 find 命令查找 logs 目录（最可靠）
             cmd = f"adb -s {device} shell find /sdcard/Android/data -type d -name \"logs\" 2>/dev/null"
             self.append_output(f"执行扫描命令: {cmd}", "INFO")
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60, **hidden_subprocess_kwargs())
 
             if result.stdout.strip():
                 self.append_output(f"找到日志路径:\n{result.stdout[:200]}", "INFO")
@@ -1654,7 +1793,7 @@ class ADBGUI:
 
                 for pkg in common_packages:
                     test_cmd = f"adb -s {device} shell test -d \"/sdcard/Android/data/{pkg}/files/logs\" && echo \"EXISTS\""
-                    test_result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                    test_result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=10, **hidden_subprocess_kwargs())
                     if "EXISTS" in test_result.stdout:
                         packages.append(pkg)
                         self.append_output(f"确认应用包名存在: {pkg}", "SUCCESS")
@@ -1663,7 +1802,7 @@ class ADBGUI:
             if not packages:
                 self.append_output(f"尝试列出所有包含 files 目录的应用...", "WARNING")
                 cmd = f"adb -s {device} shell ls -d /sdcard/Android/data/*/files 2>/dev/null"
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60, **hidden_subprocess_kwargs())
 
                 if result.stdout.strip():
                     potential_packages = []
@@ -1680,14 +1819,14 @@ class ADBGUI:
                     for pkg in potential_packages:
                         # 检查 logs 目录
                         test_cmd = f"adb -s {device} shell test -d \"/sdcard/Android/data/{pkg}/files/logs\" && echo \"LOGS\""
-                        test_result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                        test_result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=10, **hidden_subprocess_kwargs())
                         if "LOGS" in test_result.stdout:
                             packages.append(pkg)
                             continue
 
                         # 检查 log 目录（单数形式）
                         test_cmd = f"adb -s {device} shell test -d \"/sdcard/Android/data/{pkg}/files/log\" && echo \"LOG\""
-                        test_result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                        test_result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True, timeout=10, **hidden_subprocess_kwargs())
                         if "LOG" in test_result.stdout:
                             packages.append(pkg + " (log目录)")
 
@@ -1728,12 +1867,12 @@ class ADBGUI:
 
         # 当前IP信息
         ttk.Label(main_frame, text="当前IP地址:", font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-        current_ip_label = ttk.Label(main_frame, text=current_ip, font=("Microsoft YaHei", 11, "bold"), foreground="#007bff")
+        current_ip_label = ttk.Label(main_frame, text=current_ip, font=("Microsoft YaHei", 11, "bold"), foreground=self.palette["primary"])
         current_ip_label.grid(row=0, column=1, sticky=tk.W, pady=(0, 5))
 
         # 设备类型提示
         dev_type_text = "📶 无线设备" if dev_type == "wireless" else "🔌 有线设备"
-        ttk.Label(main_frame, text=f"设备类型: {dev_type_text}", font=("Microsoft YaHei", 9), foreground="#6c757d").grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(0, 15))
+        ttk.Label(main_frame, text=f"设备类型: {dev_type_text}", font=("Microsoft YaHei", 9), foreground=self.palette["muted"]).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(0, 15))
 
         # 新IP输入
         ttk.Label(main_frame, text="新IP地址:", font=("Microsoft YaHei", 10)).grid(row=2, column=0, sticky=tk.W, pady=(0, 5))
@@ -1769,11 +1908,11 @@ class ADBGUI:
             gateway = gateway_var.get().strip()
 
             if not new_ip:
-                messagebox.showwarning("警告", "请输入新的IP地址", parent=dialog)
+                self._showwarning("警告", "请输入新的IP地址", parent=dialog)
                 return
 
             if not netmask:
-                messagebox.showwarning("警告", "请输入子网掩码", parent=dialog)
+                self._showwarning("警告", "请输入子网掩码", parent=dialog)
                 return
 
             # 根据设备类型执行不同的操作
@@ -1810,11 +1949,12 @@ class ADBGUI:
                             ["adb", "-s", device, "shell", "su", "-c", "id"],
                             capture_output=True,
                             text=True,
-                            timeout=5
+                            timeout=5,
+                            **hidden_subprocess_kwargs()
                         )
 
                         if "uid=0" not in check_root.stdout:
-                            self.root.after(0, lambda: messagebox.showerror(
+                            self.root.after(0, lambda: self._showerror(
                                 "权限错误",
                                 f"设备 {device} 未获取root权限！\n\n修改IP需要root权限，请先对设备进行root操作。",
                                 parent=self.root
@@ -1827,11 +1967,12 @@ class ADBGUI:
                             ["adb", "-s", device, "shell", "su", "-c", remote_set_ip_cmd],
                             capture_output=True,
                             text=True,
-                            timeout=10
+                            timeout=10,
+                            **hidden_subprocess_kwargs()
                         )
 
                         if result.returncode == 0:
-                            self.root.after(0, lambda: messagebox.showinfo(
+                            self.root.after(0, lambda: self._showinfo(
                                 "修改成功",
                                 f"已成功为设备 {device} 设置IP地址\n\n新IP: {new_ip}\n子网掩码: {netmask}\n网关: {gateway if gateway else '未设置'}\n\n注意：此修改是临时的，设备重启后会恢复",
                                 parent=self.root
@@ -1839,7 +1980,7 @@ class ADBGUI:
                             self.append_output(f"设备 {device} IP修改成功", "SUCCESS")
                         else:
                             error_msg = result.stderr if result.stderr else result.stdout
-                            self.root.after(0, lambda: messagebox.showerror(
+                            self.root.after(0, lambda: self._showerror(
                                 "修改失败",
                                 f"修改IP失败！\n\n错误信息: {error_msg}",
                                 parent=self.root
@@ -1847,7 +1988,7 @@ class ADBGUI:
                             self.append_output(f"设备 {device} IP修改失败: {error_msg}", "ERROR")
 
                     except Exception as e:
-                        self.root.after(0, lambda: messagebox.showerror(
+                        self.root.after(0, lambda: self._showerror(
                             "执行错误",
                             f"执行修改IP命令时出错: {str(e)}",
                             parent=self.root
@@ -1865,7 +2006,7 @@ class ADBGUI:
         """确保ADB服务运行"""
         def _check():
             try:
-                result = subprocess.run(["adb", "devices"], capture_output=True, timeout=10)
+                result = subprocess.run(["adb", "devices"], capture_output=True, timeout=10, **hidden_subprocess_kwargs())
                 if result.returncode == 0:
                     self.update_status("ADB服务正常运行")
                     self.root.after(0, self.refresh_devices)
@@ -1880,9 +2021,9 @@ class ADBGUI:
         """重启ADB服务"""
         try:
             self.update_status("重启ADB服务...")
-            subprocess.run(["adb", "kill-server"], timeout=5)
+            subprocess.run(["adb", "kill-server"], timeout=5, **hidden_subprocess_kwargs())
             time.sleep(1)
-            result = subprocess.run(["adb", "start-server"], capture_output=True, text=True, timeout=10)
+            result = subprocess.run(["adb", "start-server"], capture_output=True, text=True, timeout=10, **hidden_subprocess_kwargs())
             
             if result.returncode == 0:
                 self.append_output("ADB服务重启成功", "SUCCESS")
@@ -1902,7 +2043,7 @@ class ADBGUI:
 
     def restart_adb_server(self):
         """用户触发重启ADB"""
-        if messagebox.askyesno("确认", "确定要重启ADB服务吗？"):
+        if self._askyesno("确认", "确定要重启ADB服务吗？"):
             self._restart_adb_server()
 
     def ask_select_device(self):
@@ -1939,7 +2080,7 @@ class ADBGUI:
                 selected = self.devices_list[listbox.curselection()[0]]
                 dialog.destroy()
             else:
-                messagebox.showwarning("警告", "请选择设备")
+                self._showwarning("警告", "请选择设备", parent=dialog)
 
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill=tk.X, pady=10)
@@ -1964,7 +2105,7 @@ class ADBGUI:
 
     def on_closing(self):
         """退出处理"""
-        if messagebox.askokcancel("退出", "确定要退出ADB工具吗？"):
+        if self._askokcancel("退出", "确定要退出ADB工具吗？"):
             self.shutdown()
             self.root.destroy()
 
@@ -1975,20 +2116,25 @@ class ADBGUI:
 
 def main():
     """主函数"""
+    # 先创建主窗口，确保后续弹窗居中在当前窗口
+    root = tk.Tk()
+    root.withdraw()
+
     # 检查ADB
     try:
-        subprocess.run(["adb", "version"], capture_output=True, check=True)
+        subprocess.run(["adb", "version"], capture_output=True, check=True, **hidden_subprocess_kwargs())
     except (subprocess.CalledProcessError, FileNotFoundError):
         result = messagebox.askquestion(
             "ADB未找到",
             "未检测到ADB，请确保已安装并添加到系统PATH\n是否继续运行？",
+            parent=root,
             icon='warning'
         )
         if result != 'yes':
+            root.destroy()
             return
 
-    # 启动GUI
-    root = tk.Tk()
+    root.deiconify()
     app = ADBGUI(root)
     root.mainloop()
 

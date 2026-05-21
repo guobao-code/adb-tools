@@ -14,7 +14,9 @@ from tkinter import scrolledtext, ttk
 from typing import Dict, Optional
 
 
-BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = Path(__file__).resolve().parent
+RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_DIR))
+RUNTIME_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else PROJECT_DIR
 
 
 @dataclass(frozen=True)
@@ -33,7 +35,7 @@ PAGES = [
         label="老版本视频下载",
         title="视频批量下载工具",
         subtitle="从接口任务中批量获取并下载比赛视频",
-        module_path=BASE_DIR / "Generate and export video tool" / "video_downloader.py",
+        module_path=RESOURCE_DIR / "Generate and export video tool" / "video_downloader.py",
         class_name="VideoDownloadGUI",
     ),
     PageDefinition(
@@ -41,7 +43,7 @@ PAGES = [
         label="立方眼视频下载",
         title="ADB 视频拉取工具",
         subtitle="按时间范围扫描设备录像目录并拉取本地",
-        module_path=BASE_DIR / "New-Sport2.0-videos" / "video2.0_downloader.py",
+        module_path=RESOURCE_DIR / "New-Sport2.0-videos" / "video2.0_downloader.py",
         class_name="VideoDownloadGUI",
     ),
     PageDefinition(
@@ -49,7 +51,7 @@ PAGES = [
         label="ADB 设备工具",
         title="ADB 设备工具",
         subtitle="设备管理、无线连接、日志导出、安装软件等常用 ADB 操作",
-        module_path=BASE_DIR / "enerate adb using tools" / "adb_gui.py",
+        module_path=RESOURCE_DIR / "enerate adb using tools" / "adb_gui.py",
         class_name="ADBGUI",
     ),
 ]
@@ -217,11 +219,13 @@ class UnifiedToolboxApp:
             page_class = getattr(module, page.class_name)
             state["instance"] = page_class(frame)
         except Exception:
-            self._render_load_error(frame, page)
+            error_text = traceback.format_exc()
+            state["load_error"] = error_text
+            self._render_load_error(frame, page, error_text)
 
         return state
 
-    def _render_load_error(self, frame: ttk.Frame, page: PageDefinition):
+    def _render_load_error(self, frame: ttk.Frame, page: PageDefinition, error_text: str):
         error_frame = ttk.Frame(frame, padding=18)
         error_frame.grid(row=0, column=0, sticky="nsew")
         error_frame.columnconfigure(0, weight=1)
@@ -235,7 +239,7 @@ class UnifiedToolboxApp:
 
         text = scrolledtext.ScrolledText(error_frame, wrap=tk.WORD, height=10)
         text.grid(row=1, column=0, sticky="nsew")
-        text.insert(tk.END, traceback.format_exc())
+        text.insert(tk.END, error_text)
         text.config(state=tk.DISABLED)
 
     def _get_page(self, key: str) -> PageDefinition:
@@ -264,11 +268,44 @@ class UnifiedToolboxApp:
 
 
 def main():
-    os.chdir(BASE_DIR)
+    os.chdir(RUNTIME_DIR)
     root = tk.Tk()
     UnifiedToolboxApp(root)
     root.mainloop()
 
 
+def smoke_test():
+    os.chdir(RUNTIME_DIR)
+    from tkinter import messagebox
+
+    messagebox.showinfo = lambda *args, **kwargs: "ok"
+    messagebox.showwarning = lambda *args, **kwargs: "ok"
+    messagebox.showerror = lambda *args, **kwargs: "ok"
+    messagebox.askyesno = lambda *args, **kwargs: True
+    messagebox.askquestion = lambda *args, **kwargs: "yes"
+    messagebox.askokcancel = lambda *args, **kwargs: True
+
+    root = tk.Tk()
+    root.withdraw()
+    exit_code = 0
+    try:
+        app = UnifiedToolboxApp(root)
+        for page in PAGES:
+            app.show_page(page.key)
+            state = app.page_state.get(page.key, {})
+            if state.get("load_error"):
+                raise RuntimeError(str(state["load_error"]))
+        root.update_idletasks()
+        app.on_close()
+    except Exception:
+        exit_code = 1
+        (RUNTIME_DIR / "smoke_test_error.txt").write_text(traceback.format_exc(), encoding="utf-8")
+    finally:
+        os._exit(exit_code)
+
+
 if __name__ == "__main__":
-    main()
+    if "--smoke-test" in sys.argv or os.environ.get("UNIFIED_APP_SMOKE_TEST") == "1":
+        smoke_test()
+    else:
+        main()
