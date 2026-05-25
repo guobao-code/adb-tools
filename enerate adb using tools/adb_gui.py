@@ -114,6 +114,33 @@ class ADBGUI:
         # 初始化 Insomnia 工具模块
         self.insomnia_gui = InsomniaGUI(root)
 
+    def _get_dialog_parent(self):
+        parent = self.root
+        if not isinstance(parent, (tk.Tk, tk.Toplevel)) and hasattr(parent, 'winfo_toplevel'):
+            try:
+                parent = parent.winfo_toplevel()
+            except Exception:
+                pass
+        return parent
+
+    def _showinfo(self, title, message, parent=None, **kwargs):
+        return messagebox.showinfo(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _showwarning(self, title, message, parent=None, **kwargs):
+        return messagebox.showwarning(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _showerror(self, title, message, parent=None, **kwargs):
+        return messagebox.showerror(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _askyesno(self, title, message, parent=None, **kwargs):
+        return messagebox.askyesno(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _askokcancel(self, title, message, parent=None, **kwargs):
+        return messagebox.askokcancel(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _askquestion(self, title, message, parent=None, **kwargs):
+        return messagebox.askquestion(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
         # 创建主框架（改用PanedWindow实现可拖拽调整区域大小）
         main_paned = ttk.PanedWindow(root, orient=tk.VERTICAL)
         main_paned.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
