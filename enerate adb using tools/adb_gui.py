@@ -114,33 +114,6 @@ class ADBGUI:
         # 初始化 Insomnia 工具模块
         self.insomnia_gui = InsomniaGUI(root)
 
-    def _get_dialog_parent(self):
-        parent = self.root
-        if not isinstance(parent, (tk.Tk, tk.Toplevel)) and hasattr(parent, 'winfo_toplevel'):
-            try:
-                parent = parent.winfo_toplevel()
-            except Exception:
-                pass
-        return parent
-
-    def _showinfo(self, title, message, parent=None, **kwargs):
-        return messagebox.showinfo(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
-
-    def _showwarning(self, title, message, parent=None, **kwargs):
-        return messagebox.showwarning(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
-
-    def _showerror(self, title, message, parent=None, **kwargs):
-        return messagebox.showerror(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
-
-    def _askyesno(self, title, message, parent=None, **kwargs):
-        return messagebox.askyesno(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
-
-    def _askokcancel(self, title, message, parent=None, **kwargs):
-        return messagebox.askokcancel(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
-
-    def _askquestion(self, title, message, parent=None, **kwargs):
-        return messagebox.askquestion(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
-
         # 创建主框架（改用PanedWindow实现可拖拽调整区域大小）
         main_paned = ttk.PanedWindow(root, orient=tk.VERTICAL)
         main_paned.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -300,7 +273,32 @@ class ADBGUI:
         # 延迟启动ADB检查，确保GUI完全加载
         self.root.after(500, self.ensure_adb_server_running)
 
-    # ========== 样式配置（设备卡片美化） ==========
+    def _get_dialog_parent(self):
+        parent = self.root
+        if not isinstance(parent, (tk.Tk, tk.Toplevel)) and hasattr(parent, 'winfo_toplevel'):
+            try:
+                parent = parent.winfo_toplevel()
+            except Exception:
+                pass
+        return parent
+
+    def _showinfo(self, title, message, parent=None, **kwargs):
+        return messagebox.showinfo(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _showwarning(self, title, message, parent=None, **kwargs):
+        return messagebox.showwarning(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _showerror(self, title, message, parent=None, **kwargs):
+        return messagebox.showerror(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _askyesno(self, title, message, parent=None, **kwargs):
+        return messagebox.askyesno(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _askokcancel(self, title, message, parent=None, **kwargs):
+        return messagebox.askokcancel(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
+
+    def _askquestion(self, title, message, parent=None, **kwargs):
+        return messagebox.askquestion(title, message, parent=parent or self._get_dialog_parent(), **kwargs)
     def setup_styles(self):
         """配置自定义样式"""
         style = ttk.Style()
@@ -730,16 +728,20 @@ class ADBGUI:
                     self.append_output(f"{device_prefix}{output.strip()}", "INFO")
 
             stderr = process.stderr.read()
-            if stderr:
-                self.append_output(f"{device_prefix}错误输出: {stderr.strip()}", "ERROR")
-
             return_code = process.poll()
+
+            if stderr:
+                # ADB 经常将进度信息和成功消息输出到 stderr（如 push/pull），
+                # 只在 return_code != 0 时才将其视为错误
+                if return_code != 0:
+                    self.append_output(f"{device_prefix}错误输出: {stderr.strip()}", "ERROR")
+                else:
+                    self.append_output(f"{device_prefix}{stderr.strip()}", "INFO")
 
             if return_code != 0 and retry_count > 0:
                 self.append_output(f"{device_prefix}命令执行失败，重试({retry_count}次剩余)...", "WARNING")
                 time.sleep(1)
-                self._run_adb_command(cmd.split(' ', 1)[1] if cmd.startswith('adb ') else cmd, 
-                                    device_id, retry_count-1)
+                self._run_adb_command(cmd, device_id, retry_count-1)
                 return
 
             if return_code == 0:
@@ -1187,14 +1189,22 @@ class ADBGUI:
 
         device_id = selected_device if selected_device != "所有设备（不指定）" else None
 
-        final_cmd = f'adb {custom_cmd}' if not custom_cmd.startswith('adb ') else custom_cmd
-        if device_id and '-s' not in final_cmd:
-            final_cmd = final_cmd.replace('adb ', f'adb -s {device_id} ', 1)
+        # scrcpy 是独立程序，不作为 adb 子命令执行
+        first_token = custom_cmd.strip().split()[0] if custom_cmd.strip() else ''
+        if first_token in ('scrcpy',):
+            # 构建完整命令：scrcpy -s device_id [其他参数]
+            if device_id:
+                rest = custom_cmd[len(first_token):].strip()
+                final_cmd = f'scrcpy -s {device_id} {rest}'.strip()
+            else:
+                final_cmd = custom_cmd
+            self.append_output(f"[DEBUG] 最终命令: '{final_cmd}'", "INFO")
+            # 直接通过队列执行（不走 execute_adb_command，避免自动加 adb 前缀）
+            self.command_queue.put((final_cmd, None, 2))
+        else:
+            # 传原始命令给 execute_adb_command，让它统一处理 adb 前缀和 -s 参数
+            self.execute_adb_command(custom_cmd, device_id)
 
-        self.append_output(f"[DEBUG] 最终命令: '{final_cmd}'", "INFO")  # 调试日志
-        self.append_output(f"[DEBUG] device_id参数: '{device_id}'", "INFO")  # 调试日志
-
-        self.execute_adb_command(final_cmd, device_id)
         self.cmd_input_var.set("")
         self.cmd_input_entry.focus()
 
@@ -1412,7 +1422,8 @@ class ADBGUI:
                 self.append_output(f"导出设备信息失败: {str(e)}", "ERROR")
 
     def show_file_manager(self, device=None):
-        """文件管理器（增强：支持双击进入文件夹）"""
+        """文件管理器（增强：支持双击进入文件夹）
+        兼容：如果调用时设置 self._embedded_parent 则在该父容器内创建视图；否则使用 Toplevel 窗口。"""
         if not device:
             if not self.devices_list:
                 self._showwarning("警告", "无可用设备")
@@ -1424,49 +1435,120 @@ class ADBGUI:
             else:
                 device = self.devices_list[0]
 
-        # 简化版文件管理器（保留核心功能）
-        file_window = tk.Toplevel(self.root)
-        file_window.title(f"文件管理器 - {device}")
-        file_window.geometry("800x600")
-        file_window.transient(self.root)
+        # 支持嵌入模式：如果存在 self._embedded_parent（由 _open_file_manager_embedded 设置），则在其中创建
+        embedded_parent = getattr(self, '_embedded_parent', None)
+        embedded_mode = embedded_parent is not None
+        if embedded_mode:
+            # 清空已有内容
+            for c in embedded_parent.winfo_children():
+                c.destroy()
+            # 为嵌入容器使用 grid 布局，按行放置各个区域；保证可伸缩
+            embedded_parent.columnconfigure(0, weight=1)
+            embedded_parent.rowconfigure(0, weight=1)
+            main_frame = ttk.Frame(embedded_parent, padding="8")
+            main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+            # 添加关闭按钮（在嵌入容器的底部）
+            close_btn = ttk.Button(embedded_parent, text="关闭文件管理", command=self._close_embedded_file_manager)
+            close_btn.grid(row=1, column=0, sticky=(tk.W, tk.E))
+        else:
+            # 简化版文件管理器（保留核心功能）
+            file_window = tk.Toplevel(self.root)
+            file_window.title(f"文件管理器 - {device}")
+            file_window.geometry("800x600")
+            file_window.transient(self.root)
 
-        # 更新窗口以确保尺寸信息正确
-        file_window.update_idletasks()
+            # 更新窗口以确保尺寸信息正确
+            file_window.update_idletasks()
 
-        # 居中显示
-        x = self.root.winfo_x() + (self.root.winfo_width() - file_window.winfo_width()) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - file_window.winfo_height()) // 2
-        file_window.geometry(f"+{x}+{y}")
+            # 居中显示
+            x = self.root.winfo_x() + (self.root.winfo_width() - file_window.winfo_width()) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - file_window.winfo_height()) // 2
+            file_window.geometry(f"+{x}+{y}")
 
-        main_frame = ttk.Frame(file_window, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+            main_frame = ttk.Frame(file_window, padding="10")
+            main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # 路径栏
+        # 面包屑 + 路径栏
+        breadcrumb_frame = ttk.Frame(main_frame)
         path_frame = ttk.Frame(main_frame)
-        path_frame.pack(fill=tk.X, pady=5)
         self.current_path_var = tk.StringVar(value="/sdcard")
+        if embedded_mode:
+            # 使用 grid 布局放置面包屑和路径
+            breadcrumb_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 4))
+            path_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+            main_frame.rowconfigure(2, weight=1)
+        else:
+            breadcrumb_frame.pack(fill=tk.X, pady=(0, 4))
+            path_frame.pack(fill=tk.X, pady=5)
+
         ttk.Entry(path_frame, textvariable=self.current_path_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         ttk.Button(path_frame, text="转到", command=lambda: self.browse_device_path(device, self.current_path_var.get(), file_list)).pack(side=tk.LEFT)
 
         # 文件列表
-        file_list = ttk.Treeview(main_frame, columns=("名称", "大小", "类型"), show="headings")
+        file_list = ttk.Treeview(main_frame, columns=("名称", "大小", "类型", "修改时间"), show="headings")
+        # 可点击排序的表头
         file_list.heading("名称", text="名称")
         file_list.heading("大小", text="大小")
         file_list.heading("类型", text="类型")
-        file_list.column("名称", width=400)
-        file_list.column("大小", width=100)
-        file_list.column("类型", width=80)
-        file_list.pack(fill=tk.BOTH, expand=True, pady=5)
+        file_list.heading("修改时间", text="修改时间")
+        file_list.column("名称", width=360)
+        file_list.column("大小", width=100, anchor=tk.E)
+        file_list.column("类型", width=80, anchor=tk.CENTER)
+        file_list.column("修改时间", width=140, anchor=tk.CENTER)
+        if embedded_mode:
+            file_list.grid(row=2, column=0, sticky=(tk.N, tk.S, tk.E, tk.W), pady=5)
+            main_frame.rowconfigure(2, weight=1)
+        else:
+            file_list.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        # 加载指示与分块加载控件
+        loading_var = tk.StringVar(value="")
+        loading_label = ttk.Label(main_frame, textvariable=loading_var, foreground=self.palette.get("muted", "#666"))
+        if embedded_mode:
+            loading_label.grid(row=3, column=0, sticky=(tk.W, tk.E))
+            load_more_btn = ttk.Button(main_frame, text="加载更多", state=tk.DISABLED)
+            load_more_btn.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(4, 0))
+        else:
+            loading_label.pack(fill=tk.X)
+            load_more_btn = ttk.Button(main_frame, text="加载更多", state=tk.DISABLED)
+            load_more_btn.pack(fill=tk.X, pady=(4, 0))
+
+        # 存储到控件上以便后续使用
+        file_list._breadcrumb_frame = breadcrumb_frame
+        file_list._loading_var = loading_var
+        file_list._loading_label = loading_label
+        file_list._load_more_btn = load_more_btn
+        file_list._all_rows = []
+        file_list._loaded_count = 0
+        file_list._load_chunk = 200
 
         # 操作按钮
         btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=tk.X, pady=5)
+        if embedded_mode:
+            btn_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=5)
+        else:
+            btn_frame.pack(fill=tk.X, pady=5)
         ttk.Button(btn_frame, text="上传文件", command=lambda: self.upload_file(device, self.current_path_var.get())).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_frame, text="下载选中", command=lambda: self.download_selected(device, file_list)).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_frame, text="刷新", command=lambda: self.browse_device_path(device, self.current_path_var.get(), file_list)).pack(side=tk.LEFT, padx=2)
 
-        # 绑定双击进入文件夹事件
-        file_list.bind("<Double-1>", lambda e: self.enter_selected_folder(device, file_list))
+        # 绑定双击进入文件夹 / 下载文件事件
+        file_list.bind("<Double-1>", lambda e: self._on_double_click(e, device, file_list))
+        # 绑定右键菜单
+        file_window.bind_class(file_list, '<Button-3>', lambda e: self._on_treeview_right_click(e, device, file_list))
+        file_list.bind('<Button-3>', lambda e: self._on_treeview_right_click(e, device, file_list))
+
+        # 加载更多动作绑定
+        def _on_load_more():
+            start = file_list._loaded_count
+            end = min(len(file_list._all_rows), start + file_list._load_chunk)
+            rows = file_list._all_rows[start:end]
+            self._render_file_list_append(file_list, rows)
+            file_list._loaded_count = end
+            if file_list._loaded_count >= len(file_list._all_rows):
+                file_list._load_more_btn.config(state=tk.DISABLED, text="已加载全部")
+
+        load_more_btn.config(command=_on_load_more)
 
         # 初始加载
         self.browse_device_path(device, "/sdcard", file_list)
@@ -1487,13 +1569,69 @@ class ADBGUI:
         # 浏览新路径
         self.browse_device_path(device, new_path, file_list)
 
+    def _open_file_manager_embedded(self, device):
+        """在主界面内打开嵌入式文件管理器容器（位于 root 底部）"""
+        # 如果已存在嵌入容器则复用
+        if not hasattr(self, '_embedded_container') or not self._embedded_container.winfo_exists():
+            self.root.rowconfigure(1, weight=0, minsize=420)
+            cont = ttk.Frame(self.root)
+            cont.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=6, pady=6)
+            self._embedded_container = cont
+        # 标记 parent 并调用视图创建
+        self._embedded_parent = self._embedded_container
+        self.show_file_manager(device)
+
+    def _close_embedded_file_manager(self):
+        try:
+            if hasattr(self, '_embedded_parent'):
+                for c in self._embedded_parent.winfo_children():
+                    c.destroy()
+                self._embedded_parent.grid_forget()
+                del self._embedded_parent
+            if hasattr(self, '_embedded_container'):
+                try:
+                    self._embedded_container.destroy()
+                except Exception:
+                    pass
+                del self._embedded_container
+        except Exception:
+            pass
+
     def browse_device_path(self, device, path, file_list):
         """浏览设备路径"""
         for item in file_list.get_children():
             file_list.delete(item)
-        
+
+        # 重置缓存
+        file_list._all_rows = []
+        file_list._loaded_count = 0
+        file_list._load_more_btn.config(state=tk.DISABLED, text="加载更多")
+
         self.current_path_var.set(path)
-        
+
+        # 更新面包屑
+        def _update_breadcrumb():
+            for w in file_list._breadcrumb_frame.winfo_children():
+                w.destroy()
+            parts = [p for p in path.split('/') if p]
+            cur = ''
+            def _make_click(pth):
+                return lambda: self.browse_device_path(device, pth, file_list)
+            # 根
+            btn = ttk.Button(file_list._breadcrumb_frame, text='/', width=3, command=lambda: self.browse_device_path(device, '/', file_list))
+            btn.pack(side=tk.LEFT)
+            cur = ''
+            for part in parts:
+                cur = os.path.join(cur, part).replace('\\', '/')
+                ttk.Label(file_list._breadcrumb_frame, text=' / ').pack(side=tk.LEFT)
+                b = ttk.Button(file_list._breadcrumb_frame, text=part, command=_make_click(cur))
+                b.pack(side=tk.LEFT)
+
+        try:
+            _update_breadcrumb()
+        except Exception:
+            pass
+
         def _get_files():
             try:
                 result = subprocess.run(
@@ -1513,10 +1651,34 @@ class ADBGUI:
                             if len(parts) >= 9:
                                 perm = parts[0]
                                 size = parts[4]
+                                # ls -la 格式: perm links owner group size month day time name...
+                                mtime = ' '.join(parts[5:8])
                                 name = ' '.join(parts[8:])
                                 ftype = "目录" if perm.startswith('d') else "文件"
-                                rows.append((name, size, ftype))
-                    self.root.after(0, lambda: self._render_file_list(file_list, rows))
+                                rows.append((name, size, ftype, mtime))
+                    # 缓存全部行并在主线程渲染首块
+                    file_list._all_rows = rows
+                    def _render_initial():
+                        # 显示初始加载状态
+                        file_list._loading_var.set( f"加载 {min(len(rows), file_list._load_chunk)} / {len(rows)} 项...")
+                        first = rows[:file_list._load_chunk]
+                        file_list._loaded_count = len(first)
+                        # 格式化并渲染首块
+                        formatted = [(
+                            r[0],
+                            self._human_readable_size(r[1]) if r[2] != '目录' else '-',
+                            r[2],
+                            r[3]
+                        ) for r in first]
+                        self._render_file_list(file_list, formatted)
+                        # 如果还有更多，启用加载更多按钮
+                        if file_list._loaded_count < len(rows):
+                            file_list._load_more_btn.config(state=tk.NORMAL, text="加载更多")
+                        else:
+                            file_list._load_more_btn.config(state=tk.DISABLED, text="已加载全部")
+                        file_list._loading_var.set("")
+
+                    self.root.after(0, _render_initial)
                 else:
                     error_msg = result.stderr.strip() or result.stdout.strip() or "未知错误"
                     self.append_output(f"获取文件列表失败: {error_msg}", "ERROR")
@@ -1532,8 +1694,105 @@ class ADBGUI:
         for row in rows:
             file_list.insert("", "end", values=row)
 
+    def _render_file_list_append(self, file_list, rows):
+        """在主线程中追加文件行（用于懒加载）"""
+        formatted = [(
+            r[0],
+            self._human_readable_size(r[1]) if r[2] != '目录' else '-',
+            r[2],
+            r[3]
+        ) for r in rows]
+        for row in formatted:
+            file_list.insert("", "end", values=row)
+
+    def _human_readable_size(self, size):
+        try:
+            n = int(size)
+        except Exception:
+            return size
+        for unit in ['B','KB','MB','GB','TB']:
+            if n < 1024:
+                return f"{n}{unit}"
+            n = n//1024
+        return f"{n}PB"
+
+    def _on_double_click(self, event, device, file_list):
+        iid = file_list.identify_row(event.y)
+        if not iid:
+            return
+        # 先选中被点击的行，保证后续逻辑能读取选中项
+        try:
+            file_list.selection_set(iid)
+        except Exception:
+            pass
+        vals = file_list.item(iid).get('values')
+        if not vals:
+            return
+        name = vals[0]
+        ftype = vals[2]
+        if ftype == '目录':
+            self.enter_selected_folder(device, file_list)
+        else:
+            self.download_selected(device, file_list)
+
+    def _on_treeview_right_click(self, event, device, file_list):
+        try:
+            iid = file_list.identify_row(event.y)
+            if iid:
+                file_list.selection_set(iid)
+            menu = tk.Menu(self.root, tearoff=0)
+            menu.add_command(label='下载', command=lambda: self.download_selected(device, file_list))
+            menu.add_command(label='刷新', command=lambda: self.browse_device_path(device, self.current_path_var.get(), file_list))
+            menu.add_separator()
+            menu.add_command(label='进入', command=lambda: self.enter_selected_folder(device, file_list))
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            try:
+                menu.grab_release()
+            except Exception:
+                pass
+
+    def _sort_treeview_column(self, tree, col, reverse=False):
+        # 获取所有行值并排序
+        l = [(tree.set(k, col), k) for k in tree.get_children('')]
+        # 尝试数值排序
+        try:
+            l.sort(key=lambda t: float(t[0].replace('KB','').replace('MB','').replace('GB','')), reverse=reverse)
+        except Exception:
+            l.sort(key=lambda t: t[0], reverse=reverse)
+        # 重新插入
+        for index, (val, k) in enumerate(l):
+            tree.move(k, '', index)
+        # 切换排序下次方向
+        tree.heading(col, command=lambda: self._sort_treeview_column(tree, col, not reverse))
+
+    # Android 设备上常见的只读路径
+    READ_ONLY_PREFIXES = ('/system', '/vendor', '/product', '/odm', '/oem')
+
+    def _is_writable_dest(self, dest_path):
+        """判断目标路径是否可写（非只读文件系统）"""
+        # 根目录 / 是只读的
+        if dest_path.rstrip('/') == '':
+            return False
+        # 常见只读分区
+        normalized = dest_path.rstrip('/')
+        for prefix in self.READ_ONLY_PREFIXES:
+            if normalized == prefix or normalized.startswith(prefix + '/'):
+                return False
+        return True
+
     def upload_file(self, device, dest_path):
         """上传文件"""
+        dest_path = dest_path.rstrip('/')
+        if not self._is_writable_dest(dest_path):
+            suggest = '/sdcard/'
+            if self._askyesno("路径不可写",
+                    f"目标路径 \"{dest_path}\" 是只读文件系统，无法上传文件。\n\n"
+                    f"是否切换到 {suggest} 并上传？"):
+                dest_path = suggest
+            else:
+                return
+
         file_path = filedialog.askopenfilename(parent=self.root, title="选择文件")
         if file_path:
             dest = os.path.join(dest_path, os.path.basename(file_path)).replace('\\', '/')
